@@ -41,7 +41,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 DFSDM_Filter_HandleTypeDef hdfsdm1_filter0;
-DFSDM_Channel_HandleTypeDef hdfsdm1_channel0;
+DFSDM_Channel_HandleTypeDef hdfsdm1_channel1;
 
 UART_HandleTypeDef huart2;
 
@@ -184,24 +184,24 @@ static void MX_DFSDM1_Init(void)
   {
     Error_Handler();
   }
-  hdfsdm1_channel0.Instance = DFSDM1_Channel0;
-  hdfsdm1_channel0.Init.OutputClock.Activation = ENABLE;
-  hdfsdm1_channel0.Init.OutputClock.Selection = DFSDM_CHANNEL_OUTPUT_CLOCK_SYSTEM;
-  hdfsdm1_channel0.Init.OutputClock.Divider = 2;
-  hdfsdm1_channel0.Init.Input.Multiplexer = DFSDM_CHANNEL_EXTERNAL_INPUTS;
-  hdfsdm1_channel0.Init.Input.DataPacking = DFSDM_CHANNEL_STANDARD_MODE;
-  hdfsdm1_channel0.Init.Input.Pins = DFSDM_CHANNEL_SAME_CHANNEL_PINS;
-  hdfsdm1_channel0.Init.SerialInterface.Type = DFSDM_CHANNEL_SPI_RISING;
-  hdfsdm1_channel0.Init.SerialInterface.SpiClock = DFSDM_CHANNEL_SPI_CLOCK_INTERNAL;
-  hdfsdm1_channel0.Init.Awd.FilterOrder = DFSDM_CHANNEL_FASTSINC_ORDER;
-  hdfsdm1_channel0.Init.Awd.Oversampling = 1;
-  hdfsdm1_channel0.Init.Offset = 0;
-  hdfsdm1_channel0.Init.RightBitShift = 0x00;
-  if (HAL_DFSDM_ChannelInit(&hdfsdm1_channel0) != HAL_OK)
+  hdfsdm1_channel1.Instance = DFSDM1_Channel1;
+  hdfsdm1_channel1.Init.OutputClock.Activation = ENABLE;
+  hdfsdm1_channel1.Init.OutputClock.Selection = DFSDM_CHANNEL_OUTPUT_CLOCK_SYSTEM;
+  hdfsdm1_channel1.Init.OutputClock.Divider = 2;
+  hdfsdm1_channel1.Init.Input.Multiplexer = DFSDM_CHANNEL_EXTERNAL_INPUTS;
+  hdfsdm1_channel1.Init.Input.DataPacking = DFSDM_CHANNEL_STANDARD_MODE;
+  hdfsdm1_channel1.Init.Input.Pins = DFSDM_CHANNEL_SAME_CHANNEL_PINS;
+  hdfsdm1_channel1.Init.SerialInterface.Type = DFSDM_CHANNEL_SPI_RISING;
+  hdfsdm1_channel1.Init.SerialInterface.SpiClock = DFSDM_CHANNEL_SPI_CLOCK_INTERNAL;
+  hdfsdm1_channel1.Init.Awd.FilterOrder = DFSDM_CHANNEL_FASTSINC_ORDER;
+  hdfsdm1_channel1.Init.Awd.Oversampling = 1;
+  hdfsdm1_channel1.Init.Offset = 0;
+  hdfsdm1_channel1.Init.RightBitShift = 0x00;
+  if (HAL_DFSDM_ChannelInit(&hdfsdm1_channel1) != HAL_OK)
   {
     Error_Handler();
   }
-  if (HAL_DFSDM_FilterConfigRegChannel(&hdfsdm1_filter0, DFSDM_CHANNEL_0, DFSDM_CONTINUOUS_CONV_ON) != HAL_OK)
+  if (HAL_DFSDM_FilterConfigRegChannel(&hdfsdm1_filter0, DFSDM_CHANNEL_1, DFSDM_CONTINUOUS_CONV_ON) != HAL_OK)
   {
     Error_Handler();
   }
@@ -265,20 +265,20 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GREEN_LED_Pin|GPIO_PIN_6, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : B1_Pin */
-  GPIO_InitStruct.Pin = B1_Pin;
+  /*Configure GPIO pin : BLUE_BUTTON_Pin */
+  GPIO_InitStruct.Pin = BLUE_BUTTON_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(BLUE_BUTTON_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : LD2_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin;
+  /*Configure GPIO pins : GREEN_LED_Pin PA6 */
+  GPIO_InitStruct.Pin = GREEN_LED_Pin|GPIO_PIN_6;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
