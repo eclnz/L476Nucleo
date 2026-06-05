@@ -3,3 +3,5 @@ mx.scratch
 !.settings
 
 Drivers
+
+__pycache__

@@ -1,30 +1,17 @@
 from typing import Any
 from functools import partial
-from dataclasses import dataclass
 
 import sys
 import signal
-import time
-import glob
 import serial
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from collections import deque
 
+from audio.common import DCOffset, SAMPLE_RATE, wait_for_port, exp_mov_avg
+
 MAX_SIGNAL = 2100000
 MIN_SIGNAL = -MAX_SIGNAL
-
-
-def wait_for_port() -> str | None:
-    tries = 30
-    wait = 0.5
-    print(f"Waiting for {tries}s")
-    for _ in range(int(tries / wait)):
-        ports = glob.glob("/dev/ttyACM*")
-        if ports:
-            return ports[0]
-        time.sleep(wait)
-    return None
 
 
 def setup_plot(min_signal: int, max_signal: int, titles: list[str], buffers: list[deque[int]], windows: list[int], sample_rate: float) -> tuple[Any, Any, Any]:
@@ -41,26 +28,6 @@ def setup_plot(min_signal: int, max_signal: int, titles: list[str], buffers: lis
     plt.tight_layout()
     return fig, axes, lines
 
-
-@dataclass
-class DCOffset:
-    value: float = 0.0
-
-
-def measure_sample_rate(ser: serial.Serial, num_samples: int = 100) -> float:
-    print(f"Measuring sample rate over {num_samples} samples...")
-    ser.reset_input_buffer()
-    timestamps: list[float] = []
-    while len(timestamps) < num_samples:
-        ser.readline()
-        timestamps.append(time.perf_counter())
-    return (num_samples - 1) / (timestamps[-1] - timestamps[0])
-
-
-HP_ALPHA = 0.95  # high-pass filter coefficient — closer to 1.0 = lower cutoff frequency
-
-def exp_mov_avg(dc_offset: float, val: float, alpha: float = HP_ALPHA) -> float:
-    return alpha * dc_offset + (1 - alpha) * val
 
 def update(
     _frame: Any,
@@ -105,10 +72,8 @@ def main(
 
     buffers: list[deque[int]] = [deque([0] * w, maxlen=w) for w in windows]
     dc_offset = DCOffset(value=0.0)
-    sample_rate = measure_sample_rate(ser)
-    print(f"Sample rate: {sample_rate:.1f} Hz")
-
-    fig, axes, lines = setup_plot(MIN_SIGNAL, MAX_SIGNAL, titles, buffers, windows, sample_rate)
+    print(f"Sample rate: {SAMPLE_RATE} Hz")
+    fig, axes, lines = setup_plot(MIN_SIGNAL, MAX_SIGNAL, titles, buffers, windows, SAMPLE_RATE)
 
     _ani = animation.FuncAnimation(
         fig,
@@ -117,7 +82,7 @@ def main(
         blit=False,
     )
 
-    signal.signal(signal.SIGINT, lambda *_: plt.close())
+    signal.signal(signal.SIGINT, lambda *_: plt.close())  # close plot on Ctrl+C so finally block can clean up
     try:
         plt.show()
     finally:

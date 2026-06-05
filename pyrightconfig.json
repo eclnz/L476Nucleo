@@ -1,5 +1,8 @@
 {
     "reportUnknownVariableType": "none",
     "reportUnknownMemberType": "none",
-    "reportUnknownArgumentType": "none"
+    "reportUnknownArgumentType": "none",
+    "extraPaths": ["tools"],
+    "venvPath": ".",
+    "venv": ".venv"
 }
