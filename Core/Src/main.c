@@ -18,11 +18,12 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "stm32l4xx_hal_gpio.h"
+#include "stm32l4xx_hal_def.h"
+#include <stdint.h>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -56,7 +57,7 @@ static void MX_GPIO_Init(void);
 static void MX_DFSDM1_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
-
+static void sample_audio(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -96,7 +97,7 @@ int main(void)
   MX_DFSDM1_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-
+  HAL_DFSDM_FilterRegularStart(&hdfsdm1_filter0);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -104,7 +105,7 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-
+    sample_audio();
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -178,8 +179,8 @@ static void MX_DFSDM1_Init(void)
   hdfsdm1_filter0.Init.RegularParam.Trigger = DFSDM_FILTER_SW_TRIGGER;
   hdfsdm1_filter0.Init.RegularParam.FastMode = DISABLE;
   hdfsdm1_filter0.Init.RegularParam.DmaMode = DISABLE;
-  hdfsdm1_filter0.Init.FilterParam.SincOrder = DFSDM_FILTER_FASTSINC_ORDER;
-  hdfsdm1_filter0.Init.FilterParam.Oversampling = 1;
+  hdfsdm1_filter0.Init.FilterParam.SincOrder = DFSDM_FILTER_SINC3_ORDER;
+  hdfsdm1_filter0.Init.FilterParam.Oversampling = 125;
   hdfsdm1_filter0.Init.FilterParam.IntOversampling = 1;
   if (HAL_DFSDM_FilterInit(&hdfsdm1_filter0) != HAL_OK)
   {
@@ -297,6 +298,26 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   UNUSED(GPIO_Pin);
   HAL_GPIO_TogglePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin);
 }
+
+static void sample_audio(void)
+{
+  static uint32_t counter = 0;
+  uint32_t channel;
+  int32_t sample;
+  if (HAL_DFSDM_FilterPollForRegConversion(&hdfsdm1_filter0, 1000) == HAL_OK)
+  {
+    sample = HAL_DFSDM_FilterGetRegularValue(&hdfsdm1_filter0, &channel);
+    if (counter % 2 == 0)
+    {
+      char buf[16];
+      int len = sprintf(buf, "%ld\r\n", sample);
+      HAL_UART_Transmit(&huart2, (uint8_t*)buf, len, 1000);
+    }
+    counter++;
+  }
+}
+
+
 /* USER CODE END 4 */
 
 /**
