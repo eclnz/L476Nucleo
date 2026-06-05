@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from collections import deque
 
-from audio.common import DCOffset, SAMPLE_RATE, wait_for_port, exp_mov_avg
+from audio.common import DCOffset, SAMPLE_RATE, BAUD_RATE, wait_for_port, exp_mov_avg
 
 MAX_SIGNAL = 2100000
 MIN_SIGNAL = -MAX_SIGNAL
@@ -55,7 +55,7 @@ def update(
 
 def main(
     port: str | None = None,
-    baud: int = 115200,
+    baud: int = BAUD_RATE,
     windows: list[int] = [100, 1000, 10000],
     titles: list[str] = ["Short (100 samples)", "Medium (1000 samples)", "Long (10000 samples)"],
 ) -> None:
@@ -80,6 +80,7 @@ def main(
         partial(update, ser=ser, lines=lines, axes=axes, buffers=buffers, dc_offset=dc_offset),
         interval=50,
         blit=False,
+        cache_frame_data=False,
     )
 
     signal.signal(signal.SIGINT, lambda *_: plt.close())  # close plot on Ctrl+C so finally block can clean up

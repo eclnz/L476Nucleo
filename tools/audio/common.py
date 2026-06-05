@@ -6,7 +6,7 @@ import glob
 
 HP_ALPHA = 0.95  # high-pass filter coefficient — closer to 1.0 = lower cutoff frequency
 SAMPLE_RATE = 16000  # Hz — PCLK2 (4MHz) / DFSDM clock divider (2) / oversampling (125)
-
+BAUD_RATE = 250000
 
 @dataclass
 class DCOffset:

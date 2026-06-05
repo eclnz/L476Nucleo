@@ -5,7 +5,7 @@ import serial
 import numpy as np
 import sounddevice as sd
 
-from audio.common import DCOffset, wait_for_port, exp_mov_avg
+from audio.common import DCOffset, wait_for_port, exp_mov_avg, BAUD_RATE
 
 RECORD_SECONDS = 5
 
@@ -30,7 +30,7 @@ def record(ser: serial.Serial, duration: float) -> tuple[np.ndarray, float]:
 
 def main(
     port: str | None = None,
-    baud: int = 115200,
+    baud: int = BAUD_RATE,
     duration: float = RECORD_SECONDS,
 ) -> None:
     if port is None:

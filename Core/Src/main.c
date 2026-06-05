@@ -18,11 +18,12 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "stm32l4xx_hal_def.h"
-#include <stdint.h>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdint.h>
+#include <stdbool.h>
+#include <inttypes.h>
 #include <stdio.h>
 /* USER CODE END Includes */
 
@@ -57,7 +58,8 @@ static void MX_GPIO_Init(void);
 static void MX_DFSDM1_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
-static void sample_audio(void);
+static bool read_audio(int32_t *);
+static void transmit_audio(int32_t);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -102,11 +104,14 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  int32_t sample;
   while (1)
   {
     /* USER CODE END WHILE */
+
     /* USER CODE BEGIN 3 */
-    sample_audio();
+    if (read_audio(&sample))
+      transmit_audio(sample);
   }
   /* USER CODE END 3 */
 }
@@ -229,7 +234,7 @@ static void MX_USART2_UART_Init(void)
 
   /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
-  huart2.Init.BaudRate = 115200;
+  huart2.Init.BaudRate = 250000;
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
   huart2.Init.StopBits = UART_STOPBITS_1;
   huart2.Init.Parity = UART_PARITY_NONE;
@@ -299,21 +304,22 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   HAL_GPIO_TogglePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin);
 }
 
-static void sample_audio(void)
+static bool read_audio(int32_t *out)
 {
   uint32_t channel;
-  int32_t sample;
-  if (HAL_DFSDM_FilterPollForRegConversion(&hdfsdm1_filter0, 1000) == HAL_OK)
-  {
-    sample = HAL_DFSDM_FilterGetRegularValue(&hdfsdm1_filter0, &channel);
-    char buf[16];
-    int len = sprintf(buf, "%ld\r\n", sample);
-    HAL_UART_Transmit(&huart2, (uint8_t*)buf, len, 1000);
-  }
+  if (HAL_DFSDM_FilterPollForRegConversion(&hdfsdm1_filter0, 1000) != HAL_OK)
+    return false;
+  *out = HAL_DFSDM_FilterGetRegularValue(&hdfsdm1_filter0, &channel);
+  return true;
 }
 
-
-/* USER CODE END 4 */
+static void transmit_audio(int32_t sample)
+{
+  char buf[16];
+  int len = sprintf(buf, "%" PRId32 "\r\n", sample);
+  HAL_UART_Transmit(&huart2, (uint8_t*)buf, len, 1000);
+}
+  /* USER CODE END 4 */
 
 /**
   * @brief  This function is executed in case of error occurrence.
