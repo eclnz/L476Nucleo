@@ -8,20 +8,19 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from collections import deque
 
-from audio.common import DCOffset, SAMPLE_RATE, BAUD_RATE, wait_for_port, exp_mov_avg
+from audio.common import DCOffset, RateEstimator, BAUD_RATE, wait_for_port, exp_mov_avg
 
 MAX_SIGNAL = 2100000
 MIN_SIGNAL = -MAX_SIGNAL
 
 
-def setup_plot(min_signal: int, max_signal: int, titles: list[str], buffers: list[deque[int]], windows: list[int], sample_rate: float) -> tuple[Any, Any, Any]:
+def setup_plot(min_signal: int, max_signal: int, titles: list[str], buffers: list[deque[int]]) -> tuple[Any, Any, Any]:
     fig, axes = plt.subplots(3, 1, figsize=(10, 8))
     lines = []
-    for ax, buf, title, window in zip(axes, buffers, titles, windows):
+    for ax, buf, title in zip(axes, buffers, titles):
         line, = ax.plot(buf)
         ax.set_ylim(min_signal, max_signal)
-        duration = window / sample_rate
-        ax.set_title(f"{title} — {duration * 1000:.1f} ms @ {sample_rate:.1f} Hz")
+        ax.set_title(title)
         ax.set_ylabel("Sample Value")
         lines.append(line)
     axes[-1].set_xlabel("Sample")
@@ -36,15 +35,22 @@ def update(
     axes: Any,
     buffers: list[deque[int]],
     dc_offset: DCOffset,
+    rate_estimator: RateEstimator,
+    windows: list[int],
 ) -> Any:
     while ser.in_waiting:
         try:
             val = int(ser.readline().decode().strip())
-            dc_offset.value = exp_mov_avg(dc_offset.value, val)
-            for buf in buffers:
-                buf.append(int(val - dc_offset.value))
         except ValueError:
-            pass
+            continue
+        dc_offset.value = exp_mov_avg(dc_offset.value, val)
+        rate_estimator.add()
+        for buf in buffers:
+            buf.append(int(val - dc_offset.value))
+    if rate_estimator.count > 100:
+        rate = rate_estimator.rate()
+        for ax, window in zip(axes, windows):
+            ax.set_title(f"{window} samples — {window / rate * 1000:.1f} ms @ {rate:.1f} Hz")
     for line, buf, ax in zip(lines, buffers, axes):
         line.set_ydata(buf)
         peak = max(abs(max(buf)), abs(min(buf)))
@@ -72,12 +78,12 @@ def main(
 
     buffers: list[deque[int]] = [deque([0] * w, maxlen=w) for w in windows]
     dc_offset = DCOffset(value=0.0)
-    print(f"Sample rate: {SAMPLE_RATE} Hz")
-    fig, axes, lines = setup_plot(MIN_SIGNAL, MAX_SIGNAL, titles, buffers, windows, SAMPLE_RATE)
+    rate_estimator = RateEstimator()
+    fig, axes, lines = setup_plot(MIN_SIGNAL, MAX_SIGNAL, titles, buffers)
 
     _ani = animation.FuncAnimation(
         fig,
-        partial(update, ser=ser, lines=lines, axes=axes, buffers=buffers, dc_offset=dc_offset),
+        partial(update, ser=ser, lines=lines, axes=axes, buffers=buffers, dc_offset=dc_offset, rate_estimator=rate_estimator, windows=windows),
         interval=50,
         blit=False,
         cache_frame_data=False,

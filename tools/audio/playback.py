@@ -18,10 +18,10 @@ def record(ser: serial.Serial, duration: float) -> tuple[np.ndarray, float]:
     while time.perf_counter() < end_time:
         try:
             val = int(ser.readline().decode().strip())
-            dc_offset.value = exp_mov_avg(dc_offset.value, val)
-            samples.append(int(val - dc_offset.value))
         except ValueError:
-            pass
+            continue
+        dc_offset.value = exp_mov_avg(dc_offset.value, val)
+        samples.append(int(val - dc_offset.value))
     actual_rate = len(samples) / duration
     print(f"Captured {len(samples)} samples at {actual_rate:.1f} Hz")
     arr = np.array(samples, dtype=np.float32)
