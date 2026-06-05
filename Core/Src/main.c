@@ -105,8 +105,8 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-    sample_audio();
     /* USER CODE BEGIN 3 */
+    sample_audio();
   }
   /* USER CODE END 3 */
 }
@@ -301,19 +301,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 static void sample_audio(void)
 {
-  static uint32_t counter = 0;
   uint32_t channel;
   int32_t sample;
   if (HAL_DFSDM_FilterPollForRegConversion(&hdfsdm1_filter0, 1000) == HAL_OK)
   {
     sample = HAL_DFSDM_FilterGetRegularValue(&hdfsdm1_filter0, &channel);
-    if (counter % 2 == 0)
-    {
-      char buf[16];
-      int len = sprintf(buf, "%ld\r\n", sample);
-      HAL_UART_Transmit(&huart2, (uint8_t*)buf, len, 1000);
-    }
-    counter++;
+    char buf[16];
+    int len = sprintf(buf, "%ld\r\n", sample);
+    HAL_UART_Transmit(&huart2, (uint8_t*)buf, len, 1000);
   }
 }
 
