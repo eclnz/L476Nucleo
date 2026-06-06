@@ -35,6 +35,7 @@ def update(
     axes: Any,
     buffers: list[deque[int]],
     dc_offset: DCOffset,
+    running_rms: list[float],
     rate_estimator: RateEstimator,
     windows: list[int],
 ) -> Any:
@@ -44,13 +45,20 @@ def update(
         except ValueError:
             continue
         dc_offset.value = exp_mov_avg(dc_offset.value, val)
+        clean = val - dc_offset.value
+        running_rms[0] = exp_mov_avg(running_rms[0], clean ** 2, alpha=0.999)
+        rms = running_rms[0] ** 0.5
+        if rms > 0 and abs(clean) > 10 * rms:
+            continue
         rate_estimator.add()
         for buf in buffers:
-            buf.append(int(val - dc_offset.value))
+            buf.append(int(clean))
     if rate_estimator.count > 100:
         rate = rate_estimator.rate()
+        long_buf = list(buffers[-1])
+        rms = (sum(x ** 2 for x in long_buf) / len(long_buf)) ** 0.5
         for ax, window in zip(axes, windows):
-            ax.set_title(f"{window} samples — {window / rate * 1000:.1f} ms @ {rate:.1f} Hz")
+            ax.set_title(f"{window} samples — {window / rate * 1000:.1f} ms @ {rate:.1f} Hz — RMS {rms:.0f}")
     for line, buf, ax in zip(lines, buffers, axes):
         line.set_ydata(buf)
         peak = max(abs(max(buf)), abs(min(buf)))
@@ -78,12 +86,13 @@ def main(
 
     buffers: list[deque[int]] = [deque([0] * w, maxlen=w) for w in windows]
     dc_offset = DCOffset(value=0.0)
+    running_rms = [1.0]
     rate_estimator = RateEstimator()
     fig, axes, lines = setup_plot(MIN_SIGNAL, MAX_SIGNAL, titles, buffers)
 
     _ani = animation.FuncAnimation(
         fig,
-        partial(update, ser=ser, lines=lines, axes=axes, buffers=buffers, dc_offset=dc_offset, rate_estimator=rate_estimator, windows=windows),
+        partial(update, ser=ser, lines=lines, axes=axes, buffers=buffers, dc_offset=dc_offset, running_rms=running_rms, rate_estimator=rate_estimator, windows=windows),
         interval=50,
         blit=False,
         cache_frame_data=False,
