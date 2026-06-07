@@ -8,20 +8,20 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from collections import deque
 
-from audio.common import DCOffset, SAMPLE_RATE, wait_for_port, exp_mov_avg
+from audio.common import DCOffset, RateEstimator, BAUD_RATE, wait_for_port, exp_mov_avg
+from audio.filters import make_notch_filter, make_highpass_filter, make_pipeline
 
 MAX_SIGNAL = 2100000
 MIN_SIGNAL = -MAX_SIGNAL
 
 
-def setup_plot(min_signal: int, max_signal: int, titles: list[str], buffers: list[deque[int]], windows: list[int], sample_rate: float) -> tuple[Any, Any, Any]:
+def setup_plot(min_signal: int, max_signal: int, titles: list[str], buffers: list[deque[int]]) -> tuple[Any, Any, Any]:
     fig, axes = plt.subplots(3, 1, figsize=(10, 8))
     lines = []
-    for ax, buf, title, window in zip(axes, buffers, titles, windows):
+    for ax, buf, title in zip(axes, buffers, titles):
         line, = ax.plot(buf)
         ax.set_ylim(min_signal, max_signal)
-        duration = window / sample_rate
-        ax.set_title(f"{title} — {duration * 1000:.1f} ms @ {sample_rate:.1f} Hz")
+        ax.set_title(title)
         ax.set_ylabel("Sample Value")
         lines.append(line)
     axes[-1].set_xlabel("Sample")
@@ -36,15 +36,38 @@ def update(
     axes: Any,
     buffers: list[deque[int]],
     dc_offset: DCOffset,
+    running_rms: list[float],
+    running_delta_rms: list[float],
+    prev_clean: list[float],
+    rate_estimator: RateEstimator,
+    windows: list[int],
+    pipeline: Any,
 ) -> Any:
     while ser.in_waiting:
         try:
             val = int(ser.readline().decode().strip())
-            dc_offset.value = exp_mov_avg(dc_offset.value, val)
-            for buf in buffers:
-                buf.append(int(val - dc_offset.value))
         except ValueError:
-            pass
+            continue
+        dc_offset.value = exp_mov_avg(dc_offset.value, val)
+        clean = pipeline(val - dc_offset.value)
+        running_rms[0] = exp_mov_avg(running_rms[0], clean ** 2, alpha=0.999)
+        rms = running_rms[0] ** 0.5
+        if rms > 0 and abs(clean) > 10 * rms:
+            continue
+        delta = abs(clean - prev_clean[0])
+        if running_delta_rms[0] > 0 and delta > 8 * running_delta_rms[0] ** 0.5:
+            continue
+        running_delta_rms[0] = exp_mov_avg(running_delta_rms[0], delta ** 2, alpha=0.999)
+        prev_clean[0] = clean
+        rate_estimator.add()
+        for buf in buffers:
+            buf.append(int(clean))
+    if rate_estimator.count > 100:
+        rate = rate_estimator.rate()
+        long_buf = list(buffers[-1])
+        rms = (sum(x ** 2 for x in long_buf) / len(long_buf)) ** 0.5
+        for ax, window in zip(axes, windows):
+            ax.set_title(f"{window} samples — {window / rate * 1000:.1f} ms @ {rate:.1f} Hz — RMS {rms:.0f}")
     for line, buf, ax in zip(lines, buffers, axes):
         line.set_ydata(buf)
         peak = max(abs(max(buf)), abs(min(buf)))
@@ -55,7 +78,7 @@ def update(
 
 def main(
     port: str | None = None,
-    baud: int = 115200,
+    baud: int = BAUD_RATE,
     windows: list[int] = [100, 1000, 10000],
     titles: list[str] = ["Short (100 samples)", "Medium (1000 samples)", "Long (10000 samples)"],
 ) -> None:
@@ -72,17 +95,25 @@ def main(
 
     buffers: list[deque[int]] = [deque([0] * w, maxlen=w) for w in windows]
     dc_offset = DCOffset(value=0.0)
-    print(f"Sample rate: {SAMPLE_RATE} Hz")
-    fig, axes, lines = setup_plot(MIN_SIGNAL, MAX_SIGNAL, titles, buffers, windows, SAMPLE_RATE)
+    running_rms = [1.0]
+    running_delta_rms = [1.0]
+    prev_clean = [0.0]
+    rate_estimator = RateEstimator()
+    pipeline = make_pipeline(
+        make_notch_filter(50.0, 16000.0),
+        make_highpass_filter(30.0, 16000.0, order=4),
+    )
+    fig, axes, lines = setup_plot(MIN_SIGNAL, MAX_SIGNAL, titles, buffers)
 
-    _ani = animation.FuncAnimation(
+    ani = animation.FuncAnimation(  # noqa: F841
         fig,
-        partial(update, ser=ser, lines=lines, axes=axes, buffers=buffers, dc_offset=dc_offset),
+        partial(update, ser=ser, lines=lines, axes=axes, buffers=buffers, dc_offset=dc_offset, running_rms=running_rms, running_delta_rms=running_delta_rms, prev_clean=prev_clean, rate_estimator=rate_estimator, windows=windows, pipeline=pipeline),
         interval=50,
         blit=False,
+        cache_frame_data=False,
     )
 
-    signal.signal(signal.SIGINT, lambda *_: plt.close())  # close plot on Ctrl+C so finally block can clean up
+    signal.signal(signal.SIGINT, lambda *_: plt.close())
     try:
         plt.show()
     finally:

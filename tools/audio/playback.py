@@ -5,7 +5,8 @@ import serial
 import numpy as np
 import sounddevice as sd
 
-from audio.common import DCOffset, wait_for_port, exp_mov_avg
+from audio.common import DCOffset, wait_for_port, exp_mov_avg, BAUD_RATE
+from audio.filters import make_notch_filter, make_highpass_filter, make_pipeline
 
 RECORD_SECONDS = 5
 
@@ -13,24 +14,28 @@ RECORD_SECONDS = 5
 def record(ser: serial.Serial, duration: float) -> tuple[np.ndarray, float]:
     print(f"Recording {duration}s...")
     dc_offset = DCOffset(value=0.0)
-    samples: list[int] = []
+    pipeline = make_pipeline(
+        make_notch_filter(50.0, 16000.0),
+        make_highpass_filter(30.0, 16000.0, order=4),
+    )
+    samples: list[float] = []
     end_time = time.perf_counter() + duration
     while time.perf_counter() < end_time:
         try:
             val = int(ser.readline().decode().strip())
-            dc_offset.value = exp_mov_avg(dc_offset.value, val)
-            samples.append(int(val - dc_offset.value))
         except ValueError:
-            pass
+            continue
+        dc_offset.value = exp_mov_avg(dc_offset.value, val)
+        samples.append(pipeline(val - dc_offset.value))
     actual_rate = len(samples) / duration
     print(f"Captured {len(samples)} samples at {actual_rate:.1f} Hz")
-    arr = np.array(samples, dtype=np.float32)
+    arr = np.array(samples, dtype=np.float32)  # already DC-removed and filtered
     return arr / np.max(np.abs(arr)), actual_rate
 
 
 def main(
     port: str | None = None,
-    baud: int = 115200,
+    baud: int = BAUD_RATE,
     duration: float = RECORD_SECONDS,
 ) -> None:
     if port is None:

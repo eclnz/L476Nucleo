@@ -5,3 +5,6 @@ mx.scratch
 Drivers
 
 __pycache__
+
+*.wav
+*.png
