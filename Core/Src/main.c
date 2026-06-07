@@ -25,6 +25,8 @@
 #include <stdbool.h>
 #include <inttypes.h>
 #include <stdio.h>
+#include "detector.h"
+#include "stm32l4xx_hal_gpio.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -49,7 +51,7 @@ DFSDM_Channel_HandleTypeDef hdfsdm1_channel1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+static Detector det;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -100,6 +102,7 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   HAL_DFSDM_FilterRegularStart(&hdfsdm1_filter0);
+  detector_init(&det, 5000);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -110,8 +113,15 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    if (read_audio(&sample))
-      transmit_audio(sample);
+    if (read_audio(&sample)) {
+      detector_update(&det, sample);
+      if (is_active(&det))  {
+        HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, 1);
+        transmit_audio(sample);
+      } else {
+        HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, 0);
+      }
+    }
   }
   /* USER CODE END 3 */
 }
