@@ -43,3 +43,5 @@ def wait_for_port() -> str | None:
 
 def exp_mov_avg(dc_offset: float, val: float, alpha: float = HP_ALPHA) -> float:
     return alpha * dc_offset + (1 - alpha) * val
+
+
