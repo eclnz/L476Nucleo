@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Any
 
-from audio.common import DCOffset, MicReader, wait_for_port, exp_mov_avg, BAUD_RATE
+from audio.common import BATCH_SAMPLES, DCOffset, MicReader, wait_for_port, exp_mov_avg, BAUD_RATE
 from audio.filters import make_notch_filter, make_highpass_filter, make_pipeline
 
 DURATION = 5
@@ -32,21 +32,34 @@ def main(port: str | None = None, baud: int = BAUD_RATE, duration: float = DURAT
     dc = DCOffset()
     warmup = 0
     while warmup < 50:
-        for val in reader.read_blocking():
-            dc.value = exp_mov_avg(dc.value, val)
+        _seq, batch = reader.read_blocking()
+        for val in batch:
+            dc.value = exp_mov_avg(dc.value, float(val))
             warmup += 1
 
     ser.reset_input_buffer()
     print(f"Capturing {duration}s...")
 
     raw: list[float] = []
+    last_seq: int | None = None
+    last_val: float = 0.0
     end = time.perf_counter() + duration
     signal.signal(signal.SIGINT, lambda *_: ser.close())
     try:
         while time.perf_counter() < end:
-            for val in reader.read_blocking():
-                dc.value = exp_mov_avg(dc.value, val)
+            seq, batch = reader.read_blocking()
+            if last_seq is not None and seq != last_seq + 1:
+                gap = (seq - last_seq - 1) * BATCH_SAMPLES
+                first_val = float(batch[0])
+                for i in range(gap):
+                    interp = last_val + (first_val - last_val) * (i + 1) / (gap + 1)
+                    dc.value = exp_mov_avg(dc.value, interp)
+                    raw.append(interp - dc.value)
+            for val in batch:
+                dc.value = exp_mov_avg(dc.value, float(val))
                 raw.append(float(val) - dc.value)
+            last_seq = seq
+            last_val = float(batch[-1])
     finally:
         ser.close()
 

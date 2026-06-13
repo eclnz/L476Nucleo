@@ -38,7 +38,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define AUDIO_BUF_HALF 256
+#define AUDIO_BUF_HALF 512
 #define AUDIO_BUF_SIZE (AUDIO_BUF_HALF * 2)
 #define SYNC_START 0xABCDABCDU
 #define SYNC_END   0xDCBADCBAU
@@ -58,11 +58,11 @@ UART_HandleTypeDef huart2;
 DMA_HandleTypeDef hdma_usart2_tx;
 
 /* USER CODE BEGIN PV */
-static Detector det;
 static int32_t audio_buf[AUDIO_BUF_SIZE];
 static volatile uint8_t audio_ready = 0;
 static int32_t process_buf[AUDIO_BUF_HALF];
-static uint8_t tx_frame[4 + AUDIO_BUF_HALF * 4 + 4];
+static uint8_t tx_frame[4 + 4 + AUDIO_BUF_HALF * 2 + 4];
+static uint32_t frame_seq = 0;
 // debugging
 static uint32_t tx_attempts = 0;
 static uint32_t tx_skipped = 0;
@@ -117,7 +117,6 @@ int main(void)
   MX_USART2_UART_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
-  detector_init(&det, 50000);
   HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, audio_buf, AUDIO_BUF_SIZE);
   /* USER CODE END 2 */
 
@@ -135,8 +134,13 @@ int main(void)
       uint32_t sync_start = SYNC_START;
       uint32_t sync_end = SYNC_END;
       memcpy(tx_frame, &sync_start, 4);
-      memcpy(tx_frame + 4, process_buf, sizeof(process_buf));
-      memcpy(tx_frame + 4 + sizeof(process_buf), &sync_end, 4);
+      memcpy(tx_frame + 4, &frame_seq, 4);
+      frame_seq++;
+      int16_t *p16 = (int16_t *)(tx_frame + 8);
+      for (int i = 0; i < AUDIO_BUF_HALF; i++) {
+        p16[i] = (int16_t)(process_buf[i] >> 8);
+      }
+      memcpy(tx_frame + 8 + AUDIO_BUF_HALF * 2, &sync_end, 4);
       tx_attempts++;
       if (HAL_UART_GetState(&huart2) == HAL_UART_STATE_READY) {
         HAL_UART_Transmit_DMA(&huart2, tx_frame, sizeof(tx_frame));

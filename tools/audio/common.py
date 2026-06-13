@@ -9,11 +9,11 @@ import serial
 
 HP_ALPHA = 0.95  # high-pass filter coefficient — closer to 1.0 = lower cutoff frequency
 BAUD_RATE = 1000000
-BATCH_SAMPLES = 256
-BATCH_BYTES = BATCH_SAMPLES * 4
+BATCH_SAMPLES = 512
+BATCH_BYTES = BATCH_SAMPLES * 2
 SYNC_START = struct.pack('<I', 0xABCDABCD)
 SYNC_END   = struct.pack('<I', 0xDCBADCBA)
-FRAME_BYTES = 4 + BATCH_BYTES + 4
+FRAME_BYTES = 4 + 4 + BATCH_BYTES + 4  # SYNC_START + seq + samples + SYNC_END
 
 
 @dataclass
@@ -58,7 +58,7 @@ class MicReader:
         self._ser = ser
         self._buf = bytearray()
 
-    def read(self) -> Iterator[int]:
+    def read(self) -> Iterator[tuple[int, list[int]]]:
         self._buf += self._ser.read(self._ser.in_waiting)
         if len(self._buf) < FRAME_BYTES:
             return
@@ -68,28 +68,25 @@ class MicReader:
                 self._buf = self._buf[-3:]  # keep tail in case marker spans reads
                 return
             self._buf = self._buf[idx:]  # discard bytes before start marker
-            frame_end = 4 + BATCH_BYTES + 4
-            if len(self._buf) < frame_end:
+            if len(self._buf) < FRAME_BYTES:
                 return  # wait for more data
-            if bytes(self._buf[4 + BATCH_BYTES:frame_end]) != SYNC_END:
+            if bytes(self._buf[8 + BATCH_BYTES:FRAME_BYTES]) != SYNC_END:
                 self._buf = self._buf[4:]  # bad frame, skip past this start marker
                 continue
-            data = bytes(self._buf[4:4 + BATCH_BYTES])
-            self._buf = self._buf[frame_end:]
-            for s in struct.unpack(f'<{BATCH_SAMPLES}i', data):
-                yield s >> 8
+            seq = struct.unpack('<I', self._buf[4:8])[0]
+            data = bytes(self._buf[8:8 + BATCH_BYTES])
+            self._buf = self._buf[FRAME_BYTES:]
+            yield seq, list(struct.unpack(f'<{BATCH_SAMPLES}h', data))
 
-    def read_blocking(self) -> Iterator[int]:
+    def read_blocking(self) -> tuple[int, list[int]]:
         while True:
-            samples = list(self.read())
-            if samples:
-                yield from samples
-                return
+            for frame in self.read():
+                return frame
             needed = max(1, FRAME_BYTES - len(self._buf))
             self._buf += self._ser.read(needed)
 
 
 def read_mic_sample(ser: serial.Serial) -> int:
-    return struct.unpack('<i', ser.read(4))[0] >> 8
+    return struct.unpack('<h', ser.read(2))[0]
 
 

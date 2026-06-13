@@ -66,11 +66,12 @@ def update(
     pipeline: Any,
     spec_im: Any,
 ) -> Any:
-    for val in reader.read():
-        dc_offset.value = exp_mov_avg(dc_offset.value, val)
-        clean = pipeline(val - dc_offset.value)
-        rate_estimator.add()
-        buf.append(int(clean))
+    for _seq, batch in reader.read():
+        for val in batch:
+            dc_offset.value = exp_mov_avg(dc_offset.value, float(val))
+            clean = pipeline(float(val) - dc_offset.value)
+            rate_estimator.add()
+            buf.append(int(clean))
 
     if rate_estimator.count > 100:
         rate = rate_estimator.rate()

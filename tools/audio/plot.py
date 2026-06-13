@@ -11,7 +11,7 @@ from collections import deque
 from audio.common import DCOffset, RateEstimator, BAUD_RATE, MicReader, wait_for_port, exp_mov_avg
 from audio.filters import make_notch_filter, make_highpass_filter, make_pipeline
 
-MAX_SIGNAL = 2100000
+MAX_SIGNAL = 32768
 MIN_SIGNAL = -MAX_SIGNAL
 
 
@@ -40,12 +40,13 @@ def update(
     windows: list[int],
     pipeline: Any,
 ) -> Any:
-    for val in reader.read():
-        dc_offset.value = exp_mov_avg(dc_offset.value, val)
-        clean = pipeline(val - dc_offset.value)
-        rate_estimator.add()
-        for buf in buffers:
-            buf.append(int(clean))
+    for _seq, batch in reader.read():
+        for val in batch:
+            dc_offset.value = exp_mov_avg(dc_offset.value, float(val))
+            clean = pipeline(float(val) - dc_offset.value)
+            rate_estimator.add()
+            for buf in buffers:
+                buf.append(int(clean))
     if rate_estimator.count > 100:
         rate = rate_estimator.rate()
         long_buf = list(buffers[-1])
