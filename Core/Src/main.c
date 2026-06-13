@@ -37,7 +37,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define AUDIO_BUF_HALF 256
+#define AUDIO_BUF_SIZE (AUDIO_BUF_HALF * 2)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -48,20 +49,23 @@
 /* Private variables ---------------------------------------------------------*/
 DFSDM_Filter_HandleTypeDef hdfsdm1_filter0;
 DFSDM_Channel_HandleTypeDef hdfsdm1_channel1;
+DMA_HandleTypeDef hdma_dfsdm1_flt0;
 
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 static Detector det;
+static int32_t audio_buf[AUDIO_BUF_SIZE];
+static volatile uint8_t audio_ready = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_DFSDM1_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
-static bool read_audio(int32_t *);
 static void transmit_audio(int32_t);
 /* USER CODE END PFP */
 
@@ -99,29 +103,33 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_DFSDM1_Init();
   MX_USART2_UART_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
-  HAL_DFSDM_FilterRegularStart(&hdfsdm1_filter0);
-  detector_init(&det, 5000);
+  detector_init(&det, 50000);
+  HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, audio_buf, AUDIO_BUF_SIZE);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  int32_t sample;
   while (1)
   {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    if (read_audio(&sample)) {
-      detector_update(&det, sample);
-      if (is_active(&det))  {
-        HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, 1);
-        transmit_audio(sample);
-      } else {
-        HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, 0);
+    if (audio_ready != 0) {
+      int32_t *half = (audio_ready == 1) ? audio_buf : audio_buf + AUDIO_BUF_HALF;
+      audio_ready = 0;
+      for (int i = 0; i < AUDIO_BUF_HALF; i++) {
+        detector_update(&det, half[i]);
+        if (is_active(&det)) {
+          HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, 1);
+          transmit_audio(half[i]);
+        } else {
+          HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, 0);
+        }
       }
     }
   }
@@ -206,7 +214,7 @@ static void MX_DFSDM1_Init(void)
   hdfsdm1_filter0.Instance = DFSDM1_Filter0;
   hdfsdm1_filter0.Init.RegularParam.Trigger = DFSDM_FILTER_SW_TRIGGER;
   hdfsdm1_filter0.Init.RegularParam.FastMode = DISABLE;
-  hdfsdm1_filter0.Init.RegularParam.DmaMode = DISABLE;
+  hdfsdm1_filter0.Init.RegularParam.DmaMode = ENABLE;
   hdfsdm1_filter0.Init.FilterParam.SincOrder = DFSDM_FILTER_SINC3_ORDER;
   hdfsdm1_filter0.Init.FilterParam.Oversampling = 50;
   hdfsdm1_filter0.Init.FilterParam.IntOversampling = 1;
@@ -277,6 +285,22 @@ static void MX_USART2_UART_Init(void)
 }
 
 /**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel4_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -322,18 +346,18 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-  /* Prevent unused argument(s) compilation warning */
   UNUSED(GPIO_Pin);
   HAL_GPIO_TogglePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin);
 }
 
-static bool read_audio(int32_t *out)
+void HAL_DFSDM_FilterRegConvHalfCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filter)
 {
-  uint32_t channel;
-  if (HAL_DFSDM_FilterPollForRegConversion(&hdfsdm1_filter0, 1000) != HAL_OK)
-    return false;
-  *out = HAL_DFSDM_FilterGetRegularValue(&hdfsdm1_filter0, &channel);
-  return true;
+  audio_ready = 1;
+}
+
+void HAL_DFSDM_FilterRegConvCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filter)
+{
+  audio_ready = 2;
 }
 
 static void transmit_audio(int32_t sample)
