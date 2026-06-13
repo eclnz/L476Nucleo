@@ -40,6 +40,8 @@
 /* USER CODE BEGIN PD */
 #define AUDIO_BUF_HALF 256
 #define AUDIO_BUF_SIZE (AUDIO_BUF_HALF * 2)
+#define SYNC_START 0xABCDABCDU
+#define SYNC_END   0xDCBADCBAU
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -60,6 +62,7 @@ static Detector det;
 static int32_t audio_buf[AUDIO_BUF_SIZE];
 static volatile uint8_t audio_ready = 0;
 static int32_t process_buf[AUDIO_BUF_HALF];
+static uint8_t tx_frame[4 + AUDIO_BUF_HALF * 4 + 4];
 // debugging
 static uint32_t tx_attempts = 0;
 static uint32_t tx_skipped = 0;
@@ -129,9 +132,14 @@ int main(void)
       int32_t *half = (audio_ready == 1) ? audio_buf : audio_buf + AUDIO_BUF_HALF;
       audio_ready = 0;
       memcpy(process_buf, half, sizeof(process_buf));
+      uint32_t sync_start = SYNC_START;
+      uint32_t sync_end = SYNC_END;
+      memcpy(tx_frame, &sync_start, 4);
+      memcpy(tx_frame + 4, process_buf, sizeof(process_buf));
+      memcpy(tx_frame + 4 + sizeof(process_buf), &sync_end, 4);
       tx_attempts++;
       if (HAL_UART_GetState(&huart2) == HAL_UART_STATE_READY) {
-        HAL_UART_Transmit_DMA(&huart2, (uint8_t*)process_buf, sizeof(process_buf));
+        HAL_UART_Transmit_DMA(&huart2, tx_frame, sizeof(tx_frame));
       } else {
         tx_skipped++;
       }

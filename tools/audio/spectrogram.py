@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Any
 
-from audio.common import DCOffset, wait_for_port, exp_mov_avg, BAUD_RATE, read_mic_sample
+from audio.common import DCOffset, MicReader, wait_for_port, exp_mov_avg, BAUD_RATE
 from audio.filters import make_notch_filter, make_highpass_filter, make_pipeline
 
 DURATION = 5
@@ -28,12 +28,13 @@ def main(port: str | None = None, baud: int = BAUD_RATE, duration: float = DURAT
 
     print(f"Connecting to {port}...")
     ser = serial.Serial(port, baud, timeout=1)
+    reader = MicReader(ser)
     dc = DCOffset()
     warmup = 0
     while warmup < 50:
-        val = read_mic_sample(ser)
-        dc.value = exp_mov_avg(dc.value, val)
-        warmup += 1
+        for val in reader.read_blocking():
+            dc.value = exp_mov_avg(dc.value, val)
+            warmup += 1
 
     ser.reset_input_buffer()
     print(f"Capturing {duration}s...")
@@ -43,9 +44,9 @@ def main(port: str | None = None, baud: int = BAUD_RATE, duration: float = DURAT
     signal.signal(signal.SIGINT, lambda *_: ser.close())
     try:
         while time.perf_counter() < end:
-            val = read_mic_sample(ser)
-            dc.value = exp_mov_avg(dc.value, val)
-            raw.append(float(val) - dc.value)
+            for val in reader.read_blocking():
+                dc.value = exp_mov_avg(dc.value, val)
+                raw.append(float(val) - dc.value)
     finally:
         ser.close()
 

@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from collections import deque
 
-from audio.common import DCOffset, RateEstimator, BAUD_RATE, BATCH_BYTES, wait_for_port, exp_mov_avg, read_mic_samples
+from audio.common import DCOffset, RateEstimator, BAUD_RATE, MicReader, wait_for_port, exp_mov_avg
 from audio.filters import make_notch_filter, make_highpass_filter, make_pipeline
 
 SPEC_FRAME = 4096
@@ -58,7 +58,7 @@ def setup_plot(n_frames: int) -> tuple[Any, Any, Any]:
 
 def update(
     _frame: Any,
-    ser: serial.Serial,
+    reader: MicReader,
     ax: Any,
     buf: deque,
     dc_offset: DCOffset,
@@ -66,9 +66,7 @@ def update(
     pipeline: Any,
     spec_im: Any,
 ) -> Any:
-    if ser.in_waiting < BATCH_BYTES:
-        return [spec_im]
-    for val in read_mic_samples(ser):
+    for val in reader.read():
         dc_offset.value = exp_mov_avg(dc_offset.value, val)
         clean = pipeline(val - dc_offset.value)
         rate_estimator.add()
@@ -107,6 +105,7 @@ def main(port: str | None = None, baud: int = BAUD_RATE) -> None:
     buf: deque[int] = deque([0] * SAMPLE_BUF, maxlen=SAMPLE_BUF)
     dc_offset = DCOffset(value=0.0)
     rate_estimator = RateEstimator()
+    reader = MicReader(ser)
     pipeline = make_pipeline(
         make_notch_filter(50.0, 16000.0),
         make_highpass_filter(30.0, 16000.0, order=4),
@@ -116,7 +115,7 @@ def main(port: str | None = None, baud: int = BAUD_RATE) -> None:
 
     ani = animation.FuncAnimation(  # noqa: F841
         fig,
-        partial(update, ser=ser, ax=ax, buf=buf, dc_offset=dc_offset, rate_estimator=rate_estimator, pipeline=pipeline, spec_im=spec_im),
+        partial(update, reader=reader, ax=ax, buf=buf, dc_offset=dc_offset, rate_estimator=rate_estimator, pipeline=pipeline, spec_im=spec_im),
         interval=1,
         blit=False,
         cache_frame_data=False,

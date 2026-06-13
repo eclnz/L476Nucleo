@@ -9,7 +9,11 @@ import serial
 
 HP_ALPHA = 0.95  # high-pass filter coefficient — closer to 1.0 = lower cutoff frequency
 BAUD_RATE = 1000000
-BATCH_BYTES = 256 * 4  # one DMA half-buffer in bytes
+BATCH_SAMPLES = 256
+BATCH_BYTES = BATCH_SAMPLES * 4
+SYNC_START = struct.pack('<I', 0xABCDABCD)
+SYNC_END   = struct.pack('<I', 0xDCBADCBA)
+FRAME_BYTES = 4 + BATCH_BYTES + 4
 
 
 @dataclass
@@ -49,12 +53,40 @@ def exp_mov_avg(dc_offset: float, val: float, alpha: float = HP_ALPHA) -> float:
     return alpha * dc_offset + (1 - alpha) * val
 
 
-def read_mic_samples(ser: serial.Serial) -> Iterator[int]:
-    while ser.in_waiting >= 4:
-        raw = ser.read(4)
-        if len(raw) < 4:
-            break
-        yield struct.unpack('<i', raw)[0] >> 8
+class MicReader:
+    def __init__(self, ser: serial.Serial) -> None:
+        self._ser = ser
+        self._buf = bytearray()
+
+    def read(self) -> Iterator[int]:
+        self._buf += self._ser.read(self._ser.in_waiting)
+        if len(self._buf) < FRAME_BYTES:
+            return
+        while True:
+            idx = self._buf.find(SYNC_START)
+            if idx == -1:
+                self._buf = self._buf[-3:]  # keep tail in case marker spans reads
+                return
+            self._buf = self._buf[idx:]  # discard bytes before start marker
+            frame_end = 4 + BATCH_BYTES + 4
+            if len(self._buf) < frame_end:
+                return  # wait for more data
+            if bytes(self._buf[4 + BATCH_BYTES:frame_end]) != SYNC_END:
+                self._buf = self._buf[4:]  # bad frame, skip past this start marker
+                continue
+            data = bytes(self._buf[4:4 + BATCH_BYTES])
+            self._buf = self._buf[frame_end:]
+            for s in struct.unpack(f'<{BATCH_SAMPLES}i', data):
+                yield s >> 8
+
+    def read_blocking(self) -> Iterator[int]:
+        while True:
+            samples = list(self.read())
+            if samples:
+                yield from samples
+                return
+            needed = max(1, FRAME_BYTES - len(self._buf))
+            self._buf += self._ser.read(needed)
 
 
 def read_mic_sample(ser: serial.Serial) -> int:
