@@ -58,6 +58,10 @@ DMA_HandleTypeDef hdma_usart2_tx;
 static Detector det;
 static int32_t audio_buf[AUDIO_BUF_SIZE];
 static volatile uint8_t audio_ready = 0;
+static char tx_buf[AUDIO_BUF_HALF * 16];
+// debugging
+static uint32_t tx_attempts = 0;
+static uint32_t tx_skipped = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -67,7 +71,7 @@ static void MX_DMA_Init(void);
 static void MX_DFSDM1_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
-static void transmit_audio(int32_t);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -123,14 +127,15 @@ int main(void)
     if (audio_ready != 0) {
       int32_t *half = (audio_ready == 1) ? audio_buf : audio_buf + AUDIO_BUF_HALF;
       audio_ready = 0;
+      int tx_len = 0;
+      tx_attempts++;
       for (int i = 0; i < AUDIO_BUF_HALF; i++) {
-        detector_update(&det, half[i]);
-        if (is_active(&det)) {
-          HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, 1);
-          transmit_audio(half[i]);
-        } else {
-          HAL_GPIO_WritePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin, 0);
-        }
+        tx_len += sprintf(tx_buf + tx_len, "%" PRId32 "\r\n", half[i] >> 8); // Sample is in bits [31:8]
+      }
+      if (HAL_UART_GetState(&huart2) == HAL_UART_STATE_READY) {
+        HAL_UART_Transmit_DMA(&huart2, (uint8_t*)tx_buf, tx_len);
+      } else {
+        tx_skipped++;
       }
     }
   }
@@ -364,12 +369,6 @@ void HAL_DFSDM_FilterRegConvCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filt
   audio_ready = 2;
 }
 
-static void transmit_audio(int32_t sample)
-{
-  char buf[16];
-  int len = sprintf(buf, "%" PRId32 "\r\n", sample);
-  HAL_UART_Transmit(&huart2, (uint8_t*)buf, len, 1000);
-}
 /* USER CODE END 4 */
 
 /**
