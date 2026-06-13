@@ -5,7 +5,7 @@ import serial
 import numpy as np
 import sounddevice as sd
 
-from audio.common import DCOffset, wait_for_port, exp_mov_avg, BAUD_RATE
+from audio.common import DCOffset, wait_for_port, exp_mov_avg, BAUD_RATE, read_mic_sample
 from audio.filters import make_notch_filter, make_highpass_filter, make_pipeline
 
 RECORD_SECONDS = 5
@@ -21,10 +21,7 @@ def record(ser: serial.Serial, duration: float) -> tuple[np.ndarray, float]:
     samples: list[float] = []
     end_time = time.perf_counter() + duration
     while time.perf_counter() < end_time:
-        try:
-            val = int(ser.readline().decode().strip())
-        except ValueError:
-            continue
+        val = read_mic_sample(ser)
         dc_offset.value = exp_mov_avg(dc_offset.value, val)
         samples.append(pipeline(val - dc_offset.value))
     actual_rate = len(samples) / duration

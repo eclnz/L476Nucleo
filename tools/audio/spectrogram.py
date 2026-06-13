@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Any
 
-from audio.common import DCOffset, wait_for_port, exp_mov_avg, BAUD_RATE
+from audio.common import DCOffset, wait_for_port, exp_mov_avg, BAUD_RATE, read_mic_sample
 from audio.filters import make_notch_filter, make_highpass_filter, make_pipeline
 
 DURATION = 5
@@ -31,10 +31,7 @@ def main(port: str | None = None, baud: int = BAUD_RATE, duration: float = DURAT
     dc = DCOffset()
     warmup = 0
     while warmup < 50:
-        try:
-            val = int(ser.readline().decode().strip())
-        except ValueError:
-            continue
+        val = read_mic_sample(ser)
         dc.value = exp_mov_avg(dc.value, val)
         warmup += 1
 
@@ -42,28 +39,15 @@ def main(port: str | None = None, baud: int = BAUD_RATE, duration: float = DURAT
     print(f"Capturing {duration}s...")
 
     raw: list[float] = []
-    running_rms = 1.0
-    spikes = 0
     end = time.perf_counter() + duration
     signal.signal(signal.SIGINT, lambda *_: ser.close())
     try:
         while time.perf_counter() < end:
-            try:
-                val = int(ser.readline().decode().strip())
-            except ValueError:
-                continue
+            val = read_mic_sample(ser)
             dc.value = exp_mov_avg(dc.value, val)
-            clean = float(val) - dc.value
-            running_rms = exp_mov_avg(running_rms, clean ** 2, alpha=0.999)
-            if running_rms > 0 and abs(clean) > 10 * running_rms ** 0.5:
-                spikes += 1
-                continue
-            raw.append(clean)
+            raw.append(float(val) - dc.value)
     finally:
         ser.close()
-
-    if spikes:
-        print(f"Rejected {spikes} spike samples")
 
     actual_rate = len(raw) / duration
     print(f"Captured {len(raw)} samples at {actual_rate:.1f} Hz")

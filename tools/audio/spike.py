@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from collections import deque
 
-from audio.common import DCOffset, wait_for_port, exp_mov_avg, BAUD_RATE
+from audio.common import DCOffset, wait_for_port, exp_mov_avg, BAUD_RATE, read_mic_sample
 
 PRE  = 2000   # samples before spike
 POST = 4000   # samples after spike
@@ -34,11 +34,7 @@ def main(port: str | None = None, baud: int = BAUD_RATE) -> None:
 
     try:
         while True:
-            try:
-                val = int(ser.readline().decode().strip())
-            except ValueError:
-                continue
-
+            val = read_mic_sample(ser)
             dc.value = exp_mov_avg(dc.value, val)
             clean = val - dc.value
 

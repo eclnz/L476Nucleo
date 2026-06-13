@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from collections import deque
 
-from audio.common import DCOffset, RateEstimator, BAUD_RATE, wait_for_port, exp_mov_avg
+from audio.common import DCOffset, RateEstimator, BAUD_RATE, BATCH_BYTES, wait_for_port, exp_mov_avg, read_mic_samples
 from audio.filters import make_notch_filter, make_highpass_filter, make_pipeline
 
 SPEC_FRAME = 4096
@@ -62,29 +62,15 @@ def update(
     ax: Any,
     buf: deque,
     dc_offset: DCOffset,
-    running_rms: list[float],
-    running_delta_rms: list[float],
-    prev_clean: list[float],
     rate_estimator: RateEstimator,
     pipeline: Any,
     spec_im: Any,
 ) -> Any:
-    while ser.in_waiting:
-        try:
-            val = int(ser.readline().decode().strip())
-        except ValueError:
-            continue
+    if ser.in_waiting < BATCH_BYTES:
+        return [spec_im]
+    for val in read_mic_samples(ser):
         dc_offset.value = exp_mov_avg(dc_offset.value, val)
         clean = pipeline(val - dc_offset.value)
-        running_rms[0] = exp_mov_avg(running_rms[0], clean ** 2, alpha=0.999)
-        rms = running_rms[0] ** 0.5
-        if rms > 0 and abs(clean) > 10 * rms:
-            continue
-        delta = abs(clean - prev_clean[0])
-        if running_delta_rms[0] > 0 and delta > 8 * running_delta_rms[0] ** 0.5:
-            continue
-        running_delta_rms[0] = exp_mov_avg(running_delta_rms[0], delta ** 2, alpha=0.999)
-        prev_clean[0] = clean
         rate_estimator.add()
         buf.append(int(clean))
 
@@ -120,9 +106,6 @@ def main(port: str | None = None, baud: int = BAUD_RATE) -> None:
 
     buf: deque[int] = deque([0] * SAMPLE_BUF, maxlen=SAMPLE_BUF)
     dc_offset = DCOffset(value=0.0)
-    running_rms = [1.0]
-    running_delta_rms = [1.0]
-    prev_clean = [0.0]
     rate_estimator = RateEstimator()
     pipeline = make_pipeline(
         make_notch_filter(50.0, 16000.0),
@@ -133,8 +116,8 @@ def main(port: str | None = None, baud: int = BAUD_RATE) -> None:
 
     ani = animation.FuncAnimation(  # noqa: F841
         fig,
-        partial(update, ser=ser, ax=ax, buf=buf, dc_offset=dc_offset, running_rms=running_rms, running_delta_rms=running_delta_rms, prev_clean=prev_clean, rate_estimator=rate_estimator, pipeline=pipeline, spec_im=spec_im),
-        interval=100,
+        partial(update, ser=ser, ax=ax, buf=buf, dc_offset=dc_offset, rate_estimator=rate_estimator, pipeline=pipeline, spec_im=spec_im),
+        interval=1,
         blit=False,
         cache_frame_data=False,
     )

@@ -5,7 +5,7 @@ import serial
 import numpy as np
 from datetime import datetime
 
-from audio.common import wait_for_port, exp_mov_avg, BAUD_RATE
+from audio.common import wait_for_port, exp_mov_avg, BAUD_RATE, read_mic_sample
 
 DURATION = 5
 
@@ -36,10 +36,7 @@ def save(
     signal.signal(signal.SIGINT, lambda *_: ser.close())
     try:
         while time.perf_counter() < end:
-            try:
-                val = float(ser.readline().decode().strip())
-            except ValueError:
-                continue
+            val = read_mic_sample(ser)
             dc = exp_mov_avg(dc, val)
             samples.append(val - dc)
     finally:
