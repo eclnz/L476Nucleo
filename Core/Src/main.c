@@ -29,6 +29,7 @@
 #include <string.h>
 #include "detector.h"
 #include "stm32l4xx_hal_gpio.h"
+#include "diskio_test.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -120,6 +121,20 @@ int main(void)
   MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
   HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, audio_buf, AUDIO_BUF_SIZE);
+
+  FRESULT fr = f_mount(&USERFatFS, USERPath, 1);
+  if (fr == FR_OK) {
+    HAL_UART_Transmit(&huart2, (uint8_t *)"SD mount OK\r\n", 13, 100);
+  } else {
+    char msg[32];
+    int len = snprintf(msg, sizeof(msg), "SD mount FAIL: %d\r\n", fr);
+    HAL_UART_Transmit(&huart2, (uint8_t *)msg, len, 100);
+  }
+
+#ifdef RUN_DISKIO_TESTS
+  static DiskioTestResult diskio_test;
+  diskio_test_run(&diskio_test);
+#endif
   /* USER CODE END 2 */
 
   /* Infinite loop */

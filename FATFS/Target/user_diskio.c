@@ -31,17 +31,256 @@
 #endif
 
 /* USER CODE BEGIN DECL */
+/* Implementation largely taken from http://elm-chan.org/fsw/ff/ffsample.zip*/
 
 /* Includes ------------------------------------------------------------------*/
 #include <string.h>
 #include "ff_gen_drv.h"
+#include "main.h" /* [STM32L4-HAL] */
+
+/* Private functions below are adapted from ChaN's mmc_stm32f1_spi.c
+ * Copyright (C) 2018, ChaN, all right reserved.
+ * https://elm-chan.org/fsw/ff/ffsample.zip
+ * Lines changed from the original are marked [STM32L4-HAL]. */
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
 
+/* [STM32L4-HAL] Original selected SPI channel via SPI_CH and defined CS/clock macros
+ * using direct GPIO register writes and SPIx_CR1 manipulation. Replaced with HAL:
+ * CubeMX owns peripheral init; only CS and prescaler need overriding here. */
+#define CS_HIGH()   HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, GPIO_PIN_SET)
+#define CS_LOW()    HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, GPIO_PIN_RESET)
+#define FCLK_SLOW() do { hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128; HAL_SPI_Init(&hspi2); } while(0)
+#define FCLK_FAST() do { hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;   HAL_SPI_Init(&hspi2); } while(0)
+
+/* [STM32L4-HAL] No MMC_CD/MMC_WP pins wired — card always present, never write-protected */
+#define MMC_CD  1
+#define MMC_WP  0
+
+/* MMC card type flags — from ChaN's diskio.h (not present in project's diskio.h) */
+#define CT_MMC3		0x01		/* MMC ver 3 */
+#define CT_MMC4		0x02		/* MMC ver 4+ */
+#define CT_MMC		0x03		/* MMC */
+#define CT_SDC1		0x02		/* SDC ver 1 */
+#define CT_SDC2		0x04		/* SDC ver 2+ */
+#define CT_SDC		0x0C		/* SDC */
+#define CT_BLOCK	0x10		/* Block addressing */
+
+/* MMC/SD command — verbatim from ChaN mmc_stm32f1_spi.c */
+#define CMD0	(0)			/* GO_IDLE_STATE */
+#define CMD1	(1)			/* SEND_OP_COND (MMC) */
+#define	ACMD41	(0x80+41)	/* SEND_OP_COND (SDC) */
+#define CMD8	(8)			/* SEND_IF_COND */
+#define CMD9	(9)			/* SEND_CSD */
+#define CMD10	(10)		/* SEND_CID */
+#define CMD12	(12)		/* STOP_TRANSMISSION */
+#define ACMD13	(0x80+13)	/* SD_STATUS (SDC) */
+#define CMD16	(16)		/* SET_BLOCKLEN */
+#define CMD17	(17)		/* READ_SINGLE_BLOCK */
+#define CMD18	(18)		/* READ_MULTIPLE_BLOCK */
+#define CMD23	(23)		/* SET_BLOCK_COUNT (MMC) */
+#define	ACMD23	(0x80+23)	/* SET_WR_BLK_ERASE_COUNT (SDC) */
+#define CMD24	(24)		/* WRITE_BLOCK */
+#define CMD25	(25)		/* WRITE_MULTIPLE_BLOCK */
+#define CMD32	(32)		/* ERASE_ER_BLK_START */
+#define CMD33	(33)		/* ERASE_ER_BLK_END */
+#define CMD38	(38)		/* ERASE */
+#define CMD55	(55)		/* APP_CMD */
+#define CMD58	(58)		/* READ_OCR */
+
 /* Private variables ---------------------------------------------------------*/
 /* Disk status */
 static volatile DSTATUS Stat = STA_NOINIT;
+/* [STM32L4-HAL] Timer1/Timer2 (1kHz decrement, driven by disk_timerproc ISR) removed;
+ * replaced inline with HAL_GetTick() comparisons throughout. */
+static BYTE CardType;
+
+extern SPI_HandleTypeDef hspi2; /* [STM32L4-HAL] */
+
+/*-----------------------------------------------------------------------*/
+/* SPI controls (Platform dependent)                                     */
+/*-----------------------------------------------------------------------*/
+
+/* [STM32L4-HAL] init_spi(): original called SPIxENABLE() to configure GPIO and enable
+ * the SPI peripheral. CubeMX handles this; only CS high + settling delay needed. */
+static void init_spi (void)
+{
+	CS_HIGH();
+	HAL_Delay(10);
+}
+
+/* [STM32L4-HAL] xchg_spi(): original wrote/read SPIx_DR directly and polled SPIx_SR.
+ * Replaced with HAL_SPI_TransmitReceive. */
+static BYTE xchg_spi (BYTE dat)
+{
+	BYTE rx;
+	HAL_SPI_TransmitReceive(&hspi2, &dat, &rx, 1, HAL_MAX_DELAY);
+	return rx;
+}
+
+/* [STM32L4-HAL] rcvr_spi_multi(): original switched SPI to 16-bit mode for throughput
+ * using direct CR1 manipulation. Replaced with a single HAL_SPI_TransmitReceive call
+ * for the full buffer. SPI requires dummy 0xFF TX bytes to clock in RX data, so buff
+ * is pre-filled with 0xFF and used as both TX and RX. This is safe in polling mode
+ * because HAL reads buff[i] (still 0xFF) before writing the received byte into it. */
+static void rcvr_spi_multi (BYTE *buff, UINT btr)
+{
+	memset(buff, 0xFF, btr);
+	HAL_SPI_TransmitReceive(&hspi2, buff, buff, btr, HAL_MAX_DELAY);
+}
+
+#if _USE_WRITE == 1
+/* [STM32L4-HAL] xmit_spi_multi(): original used 16-bit SPI register trick.
+ * Replaced with HAL_SPI_Transmit for the full buffer in one call. RX bytes
+ * are clocked in by the hardware but discarded — we only care about TX here. */
+static void xmit_spi_multi (const BYTE *buff, UINT btx)
+{
+	HAL_SPI_Transmit(&hspi2, (BYTE*)buff, btx, HAL_MAX_DELAY);
+}
+#endif
+
+/*-----------------------------------------------------------------------*/
+/* Wait for card ready                                                   */
+/*-----------------------------------------------------------------------*/
+
+static int wait_ready (	/* 1:Ready, 0:Timeout */
+	UINT wt			/* Timeout [ms] */
+)
+{
+	BYTE d;
+
+	uint32_t t = HAL_GetTick(); /* [STM32L4-HAL] was: Timer2 = wt; */
+	do {
+		d = xchg_spi(0xFF);
+	} while (d != 0xFF && (HAL_GetTick() - t < wt)); /* [STM32L4-HAL] was: && Timer2 */
+
+	return (d == 0xFF) ? 1 : 0;
+}
+
+/*-----------------------------------------------------------------------*/
+/* Deselect card and release SPI                                         */
+/*-----------------------------------------------------------------------*/
+
+/* Verbatim from ChaN */
+static void deselect (void)
+{
+	CS_HIGH();		/* Set CS# high */
+	xchg_spi(0xFF);	/* Dummy clock (force DO hi-z for multiple slave SPI) */
+}
+
+/*-----------------------------------------------------------------------*/
+/* Select card and wait for ready                                        */
+/*-----------------------------------------------------------------------*/
+
+/* Verbatim from ChaN */
+static int select (void)	/* 1:OK, 0:Timeout */
+{
+	CS_LOW();		/* Set CS# low */
+	xchg_spi(0xFF);	/* Dummy clock (force DO enabled) */
+	if (wait_ready(500)) return 1;	/* Wait for card ready */
+
+	deselect();
+	return 0;	/* Timeout */
+}
+
+/*-----------------------------------------------------------------------*/
+/* Receive a data packet from the MMC                                    */
+/*-----------------------------------------------------------------------*/
+
+static int rcvr_datablock (	/* 1:OK, 0:Error */
+	BYTE *buff,				/* Data buffer */
+	UINT btr				/* Data block length (byte) */
+)
+{
+	BYTE token;
+
+	uint32_t t = HAL_GetTick(); /* [STM32L4-HAL] was: Timer1 = 200; */
+	do {
+		token = xchg_spi(0xFF);
+	} while ((token == 0xFF) && (HAL_GetTick() - t < 200)); /* [STM32L4-HAL] was: && Timer1 */
+	if(token != 0xFE) return 0;
+
+	rcvr_spi_multi(buff, btr);
+	xchg_spi(0xFF); xchg_spi(0xFF);			/* Discard CRC */
+
+	return 1;
+}
+
+/*-----------------------------------------------------------------------*/
+/* Send a data packet to the MMC                                         */
+/*-----------------------------------------------------------------------*/
+
+#if _USE_WRITE == 1
+/* Verbatim from ChaN */
+static int xmit_datablock (	/* 1:OK, 0:Failed */
+	const BYTE *buff,		/* Pointer to 512 byte data to be sent */
+	BYTE token				/* Token */
+)
+{
+	BYTE resp;
+
+	if (!wait_ready(500)) return 0;
+	xchg_spi(token);
+	if (token != 0xFD) {
+		xmit_spi_multi(buff, 512);
+		xchg_spi(0xFF); xchg_spi(0xFF);	/* Dummy CRC */
+
+		resp = xchg_spi(0xFF);
+		if ((resp & 0x1F) != 0x05) return 0;
+	}
+	return 1;
+}
+#endif
+
+/*-----------------------------------------------------------------------*/
+/* Send a command packet to the MMC                                      */
+/*-----------------------------------------------------------------------*/
+
+/* Verbatim from ChaN */
+static BYTE send_cmd (	/* Return value: R1 resp (bit7==1:Failed to send) */
+	BYTE cmd,			/* Command index */
+	DWORD arg			/* Argument */
+)
+{
+	BYTE n, res;
+
+	if (cmd & 0x80) {	/* Send a CMD55 prior to ACMD<n> */
+		cmd &= 0x7F;
+		res = send_cmd(CMD55, 0);
+		if (res > 1) return res;
+	}
+
+	/* Select the card and wait for ready except to stop multiple block read */
+	if (cmd != CMD12) {
+		deselect();
+		if (!select()) return 0xFF;
+	}
+
+	/* Send command packet */
+	xchg_spi(0x40 | cmd);				/* Start + command index */
+	xchg_spi((BYTE)(arg >> 24));		/* Argument[31..24] */
+	xchg_spi((BYTE)(arg >> 16));		/* Argument[23..16] */
+	xchg_spi((BYTE)(arg >> 8));			/* Argument[15..8] */
+	xchg_spi((BYTE)arg);				/* Argument[7..0] */
+	n = 0x01;							/* Dummy CRC + Stop */
+	if (cmd == CMD0) n = 0x95;			/* Valid CRC for CMD0(0) */
+	if (cmd == CMD8) n = 0x87;			/* Valid CRC for CMD8(0x1AA) */
+	xchg_spi(n);
+
+	/* Receive command resp */
+	if (cmd == CMD12) xchg_spi(0xFF);	/* Discard following one byte when CMD12 */
+	n = 10;								/* Wait for response (10 bytes max) */
+	do {
+		res = xchg_spi(0xFF);
+	} while ((res & 0x80) && --n);
+
+	return res;
+}
+
+/* [STM32L4-HAL] disk_timerproc() omitted — it decremented Timer1/Timer2 from a 1ms ISR
+ * and updated Stat via MMC_CD/MMC_WP pins. Neither is needed: timeouts use
+ * HAL_GetTick() and card detect/WP are hardcoded above. */
 
 /* USER CODE END DECL */
 
@@ -81,7 +320,49 @@ DSTATUS USER_initialize (
 )
 {
   /* USER CODE BEGIN INIT */
-    Stat = STA_NOINIT;
+    /* Verbatim from ChaN disk_initialize(), Timer1 replaced with HAL_GetTick() [STM32L4-HAL] */
+    BYTE n, cmd, ty, ocr[4];
+
+    if (pdrv) return STA_NOINIT;
+    init_spi();
+
+    if (Stat & STA_NODISK) return Stat;	/* [STM32L4-HAL] MMC_CD hardcoded 1, so never set */
+
+    FCLK_SLOW();
+    for (n = 10; n; n--) xchg_spi(0xFF);	/* Send 80 dummy clocks */
+
+    ty = 0;
+    uint32_t t = HAL_GetTick();					/* [STM32L4-HAL] was: Timer1 = 1000; */
+    if (send_cmd(CMD0, 0) == 1) {				/* Put the card SPI/Idle state */
+        if (send_cmd(CMD8, 0x1AA) == 1) {		/* SDv2? */
+            for (n = 0; n < 4; n++) ocr[n] = xchg_spi(0xFF);	/* Get 32 bit return value of R7 resp */
+            if (ocr[2] == 0x01 && ocr[3] == 0xAA) {			/* Is the card supports vcc of 2.7-3.6V? */
+                while ((HAL_GetTick() - t < 1000) && send_cmd(ACMD41, 1UL << 30)) ;	/* [STM32L4-HAL] was: while (Timer1 && ...) */
+                if ((HAL_GetTick() - t < 1000) && send_cmd(CMD58, 0) == 0) {			/* [STM32L4-HAL] was: if (Timer1 && ...) */
+                    for (n = 0; n < 4; n++) ocr[n] = xchg_spi(0xFF);
+                    ty = (ocr[0] & 0x40) ? CT_SDC2 | CT_BLOCK : CT_SDC2;	/* Card id SDv2 */
+                }
+            }
+        } else {	/* Not SDv2 card */
+            if (send_cmd(ACMD41, 0) <= 1) {
+                ty = CT_SDC1; cmd = ACMD41;		/* SDv1 (ACMD41(0)) */
+            } else {
+                ty = CT_MMC3; cmd = CMD1;		/* MMCv3 (CMD1(0)) */
+            }
+            while ((HAL_GetTick() - t < 1000) && send_cmd(cmd, 0)) ;				/* [STM32L4-HAL] was: while (Timer1 && ...) */
+            if ((HAL_GetTick() - t >= 1000) || send_cmd(CMD16, 512) != 0) ty = 0;	/* [STM32L4-HAL] was: if (!Timer1 || ...) */
+        }
+    }
+    CardType = ty;
+    deselect();
+
+    if (ty) {
+        FCLK_FAST();
+        Stat &= ~STA_NOINIT;
+    } else {
+        Stat = STA_NOINIT;
+    }
+
     return Stat;
   /* USER CODE END INIT */
 }
@@ -96,7 +377,8 @@ DSTATUS USER_status (
 )
 {
   /* USER CODE BEGIN STATUS */
-    Stat = STA_NOINIT;
+    /* Verbatim from ChaN disk_status() */
+    if (pdrv) return STA_NOINIT;
     return Stat;
   /* USER CODE END STATUS */
 }
@@ -117,7 +399,28 @@ DRESULT USER_read (
 )
 {
   /* USER CODE BEGIN READ */
-    return RES_OK;
+    /* Verbatim from ChaN disk_read() */
+    if (pdrv || !count) return RES_PARERR;
+    if (Stat & STA_NOINIT) return RES_NOTRDY;
+
+    if (!(CardType & CT_BLOCK)) sector *= 512;	/* LBA to BA conversion (byte addressing cards) */
+
+    if (count == 1) {	/* Single sector read */
+        if ((send_cmd(CMD17, sector) == 0) && rcvr_datablock(buff, 512)) {
+            count = 0;
+        }
+    } else {			/* Multiple sector read */
+        if (send_cmd(CMD18, sector) == 0) {
+            do {
+                if (!rcvr_datablock(buff, 512)) break;
+                buff += 512;
+            } while (--count);
+            send_cmd(CMD12, 0);				/* STOP_TRANSMISSION */
+        }
+    }
+    deselect();
+
+    return count ? RES_ERROR : RES_OK;
   /* USER CODE END READ */
 }
 
@@ -138,8 +441,30 @@ DRESULT USER_write (
 )
 {
   /* USER CODE BEGIN WRITE */
-  /* USER CODE HERE */
-    return RES_OK;
+    /* Verbatim from ChaN disk_write() */
+    if (pdrv || !count) return RES_PARERR;
+    if (Stat & STA_NOINIT) return RES_NOTRDY;
+    if (Stat & STA_PROTECT) return RES_WRPRT;
+
+    if (!(CardType & CT_BLOCK)) sector *= 512;	/* LBA to BA conversion (byte addressing cards) */
+
+    if (count == 1) {	/* Single sector write */
+        if ((send_cmd(CMD24, sector) == 0) && xmit_datablock(buff, 0xFE)) {
+            count = 0;
+        }
+    } else {			/* Multiple sector write */
+        if (CardType & CT_SDC) send_cmd(ACMD23, count);	/* Predefine number of sectors */
+        if (send_cmd(CMD25, sector) == 0) {
+            do {
+                if (!xmit_datablock(buff, 0xFC)) break;
+                buff += 512;
+            } while (--count);
+            if (!xmit_datablock(0, 0xFD)) count = 1;	/* STOP_TRAN token */
+        }
+    }
+    deselect();
+
+    return count ? RES_ERROR : RES_OK;
   /* USER CODE END WRITE */
 }
 #endif /* _USE_WRITE == 1 */
@@ -159,7 +484,101 @@ DRESULT USER_ioctl (
 )
 {
   /* USER CODE BEGIN IOCTL */
-    DRESULT res = RES_ERROR;
+    /* Verbatim from ChaN disk_ioctl().
+     * Note: MMC_GET_TYPE/CSD/CID/OCR/SDSTAT command codes differ from ChaN's newer
+     * diskio.h (50+) vs this project's diskio.h (10+) — [STM32L4-HAL] */
+    DRESULT res;
+    BYTE n, csd[16];
+    DWORD csize; /* st, ed removed — only used in CTRL_TRIM which is not implemented */
+
+    if (pdrv) return RES_PARERR;
+    if (Stat & STA_NOINIT) return RES_NOTRDY;
+
+    res = RES_ERROR;
+
+    switch (cmd) {
+    case CTRL_SYNC:			/* Wait for end of internal write process of the drive */
+        if (select()) { deselect(); res = RES_OK; }
+        break;
+
+    case GET_SECTOR_COUNT:	/* Get drive capacity in unit of sector (DWORD) */
+        if ((send_cmd(CMD9, 0) == 0) && rcvr_datablock(csd, 16)) {
+            if ((csd[0] >> 6) == 1) {	/* SDC CSD ver 2 */
+                csize = csd[9] + ((WORD)csd[8] << 8) + ((DWORD)(csd[7] & 63) << 16) + 1;
+                *(DWORD*)buff = csize << 10;
+            } else {					/* SDC CSD ver 1 or MMC */
+                n = (csd[5] & 15) + ((csd[10] & 128) >> 7) + ((csd[9] & 3) << 1) + 2;
+                csize = (csd[8] >> 6) + ((WORD)csd[7] << 2) + ((WORD)(csd[6] & 3) << 10) + 1;
+                *(DWORD*)buff = csize << (n - 9);
+            }
+            res = RES_OK;
+        }
+        break;
+
+    case GET_SECTOR_SIZE:	/* [STM32L4-HAL] Not in ChaN original — SD cards always use 512-byte sectors */
+        *(WORD*)buff = 512;
+        res = RES_OK;
+        break;
+
+    case GET_BLOCK_SIZE:	/* Get erase block size in unit of sector (DWORD) */
+        if (CardType & CT_SDC2) {	/* SDC ver 2+ */
+            if (send_cmd(ACMD13, 0) == 0) {	/* Read SD status */
+                xchg_spi(0xFF);
+                if (rcvr_datablock(csd, 16)) {
+                    for (n = 64 - 16; n; n--) xchg_spi(0xFF);	/* Purge trailing data */
+                    *(DWORD*)buff = 16UL << (csd[10] >> 4);
+                    res = RES_OK;
+                }
+            }
+        } else {					/* SDC ver 1 or MMC */
+            if ((send_cmd(CMD9, 0) == 0) && rcvr_datablock(csd, 16)) {
+                if (CardType & CT_SDC1) {	/* SDC ver 1.XX */
+                    *(DWORD*)buff = (((csd[10] & 63) << 1) + ((WORD)(csd[11] & 128) >> 7) + 1) << ((csd[13] >> 6) - 1);
+                } else {					/* MMC */
+                    *(DWORD*)buff = ((WORD)((csd[10] & 124) >> 2) + 1) * (((csd[11] & 3) << 3) + ((csd[11] & 224) >> 5) + 1);
+                }
+                res = RES_OK;
+            }
+        }
+        break;
+
+    case MMC_GET_TYPE:		/* Get MMC/SDC type (BYTE) */
+        *(BYTE*)buff = CardType;
+        res = RES_OK;
+        break;
+
+    case MMC_GET_CSD:		/* Read CSD (16 bytes) */
+        if (send_cmd(CMD9, 0) == 0 && rcvr_datablock((BYTE*)buff, 16)) {
+            res = RES_OK;
+        }
+        break;
+
+    case MMC_GET_CID:		/* Read CID (16 bytes) */
+        if (send_cmd(CMD10, 0) == 0 && rcvr_datablock((BYTE*)buff, 16)) {
+            res = RES_OK;
+        }
+        break;
+
+    case MMC_GET_OCR:		/* Read OCR (4 bytes) */
+        if (send_cmd(CMD58, 0) == 0) {
+            for (n = 0; n < 4; n++) *(((BYTE*)buff) + n) = xchg_spi(0xFF);
+            res = RES_OK;
+        }
+        break;
+
+    case MMC_GET_SDSTAT:	/* Read SD status (64 bytes) */
+        if (send_cmd(ACMD13, 0) == 0) {
+            xchg_spi(0xFF);
+            if (rcvr_datablock((BYTE*)buff, 64)) res = RES_OK;
+        }
+        break;
+
+    default:
+        res = RES_PARERR;
+    }
+
+    deselect();
+
     return res;
   /* USER CODE END IOCTL */
 }
