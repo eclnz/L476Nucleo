@@ -100,14 +100,25 @@ extern SPI_HandleTypeDef hspi2; /* [STM32L4-HAL] */
 /* SPI controls (Platform dependent)                                     */
 /*-----------------------------------------------------------------------*/
 /* https://elm-chan.org/docs/spi_e.html */
-/* [STM32L4-HAL] init_spi(): original called SPIxENABLE() to configure GPIO and enable
- * the SPI peripheral. CubeMX handles this; only CS high + settling delay needed. */
+/**
+ * @brief  [STM32L4-HAL] Initialise the SPI2 interface for SD card use.
+ * @note   Originally called SPIxENABLE() to configure GPIO and enable the SPI
+ *         peripheral. CubeMX handles peripheral init; only CS de-assertion and
+ *         a settling delay are needed here.
+ */
 static void init_spi (void)
 {
 	CS_HIGH();
 	HAL_Delay(10);
 }
 
+/**
+ * @brief  [STM32L4-HAL] Exchange a single byte over SPI2 (full-duplex, blocking).
+ * @param  dat  Byte to transmit. Pass 0xFF when only receiving.
+ * @return Byte received from the peripheral during the same clock cycle.
+ * @note   Originally accessed SPIx_DR/SPIx_SR directly; replaced with
+ *         HAL_SPI_TransmitReceive for portability.
+ */
 static BYTE xchg_spi (BYTE dat)
 {
 	BYTE rx;
@@ -115,11 +126,15 @@ static BYTE xchg_spi (BYTE dat)
 	return rx;
 }
 
-/* [STM32L4-HAL] rcvr_spi_multi(): original switched SPI to 16-bit mode for throughput
- * using direct CR1 manipulation. Replaced with a single HAL_SPI_TransmitReceive call
- * for the full buffer. SPI requires dummy 0xFF TX bytes to clock in RX data, so buff
- * is pre-filled with 0xFF and used as both TX and RX. This is safe in polling mode
- * because HAL reads buff[i] (still 0xFF) before writing the received byte into it. */
+/**
+ * @brief  [STM32L4-HAL] Receive multiple bytes from the card over SPI2.
+ * @param  buff  Destination buffer; also serves as the TX dummy buffer (pre-filled 0xFF).
+ * @param  btr   Number of bytes to receive.
+ * @note   Originally switched SPI to 16-bit mode via direct CR1 manipulation for
+ *         throughput. Replaced with a single HAL_SPI_TransmitReceive call. The buffer
+ *         is pre-filled with 0xFF (the required dummy TX value). In polling mode HAL
+ *         reads buff[i] before overwriting it with the received byte, so this is safe.
+ */
 static void rcvr_spi_multi (BYTE *buff, UINT btr)
 {
 	memset(buff, 0xFF, btr);
@@ -127,20 +142,26 @@ static void rcvr_spi_multi (BYTE *buff, UINT btr)
 }
 
 #if _USE_WRITE == 1
-/* [STM32L4-HAL] xmit_spi_multi(): original used 16-bit SPI register trick.
- * Replaced with HAL_SPI_Transmit for the full buffer in one call. RX bytes
- * are clocked in by the hardware but discarded — we only care about TX here. */
+/**
+ * @brief  [STM32L4-HAL] Transmit multiple bytes to the card over SPI2.
+ * @param  buff  Source data buffer.
+ * @param  btx   Number of bytes to transmit.
+ * @note   Originally used the 16-bit SPI register trick for throughput. Replaced with
+ *         HAL_SPI_Transmit for the full buffer in one call. RX bytes are clocked in
+ *         by hardware but discarded.
+ */
 static void xmit_spi_multi (const BYTE *buff, UINT btx)
 {
 	HAL_SPI_Transmit(&hspi2, (BYTE*)buff, btx, HAL_MAX_DELAY);
 }
 #endif
 
-/*-----------------------------------------------------------------------*/
-/* Wait for card ready                                                   */
-/*-----------------------------------------------------------------------*/
-
-static int wait_ready (	/* 1:Ready, 0:Timeout */
+/**
+ * @brief  Wait until the SD card signals ready (DO = 0xFF) or a timeout expires.
+ * @param  wt  Timeout in milliseconds.
+ * @return 1 if the card became ready within the timeout, 0 on timeout.
+ */
+static int wait_ready (
 	UINT wt			/* Timeout [ms] */
 )
 {
@@ -154,23 +175,23 @@ static int wait_ready (	/* 1:Ready, 0:Timeout */
 	return (d == 0xFF) ? 1 : 0;
 }
 
-/*-----------------------------------------------------------------------*/
-/* Deselect card and release SPI                                         */
-/*-----------------------------------------------------------------------*/
-
-/* Verbatim from ChaN */
+/**
+ * @brief  De-select the SD card and release the SPI bus.
+ * @note   An extra dummy clock is sent after raising CS to force DO hi-Z,
+ *         required for multi-slave SPI configurations. Verbatim from ChaN.
+ */
 static void deselect (void)
 {
 	CS_HIGH();		/* Set CS# high */
 	xchg_spi(0xFF);	/* Dummy clock (force DO hi-z for multiple slave SPI) */
 }
 
-/*-----------------------------------------------------------------------*/
-/* Select card and wait for ready                                        */
-/*-----------------------------------------------------------------------*/
-
-/* Verbatim from ChaN */
-static int select (void)	/* 1:OK, 0:Timeout */
+/**
+ * @brief  Select the SD card and wait until it is ready.
+ * @return 1 if the card is ready, 0 on timeout (card is also de-selected on timeout).
+ * @note   Verbatim from ChaN.
+ */
+static int select (void)
 {
 	CS_LOW();		/* Set CS# low */
 	xchg_spi(0xFF);	/* Dummy clock (force DO enabled) */
@@ -180,13 +201,15 @@ static int select (void)	/* 1:OK, 0:Timeout */
 	return 0;	/* Timeout */
 }
 
-/*-----------------------------------------------------------------------*/
-/* Receive a data packet from the MMC                                    */
-/*-----------------------------------------------------------------------*/
-
-static int rcvr_datablock (	/* 1:OK, 0:Error */
-	BYTE *buff,				/* Data buffer */
-	UINT btr				/* Data block length (byte) */
+/**
+ * @brief  Receive a data block from the SD card.
+ * @param  buff  Destination buffer (must be at least @p btr bytes).
+ * @param  btr   Number of bytes to read (typically 512).
+ * @return 1 on success, 0 if the data start token (0xFE) was not received within 200 ms.
+ */
+static int rcvr_datablock (
+	BYTE *buff,
+	UINT btr
 )
 {
 	BYTE token;
@@ -203,15 +226,17 @@ static int rcvr_datablock (	/* 1:OK, 0:Error */
 	return 1;
 }
 
-/*-----------------------------------------------------------------------*/
-/* Send a data packet to the MMC                                         */
-/*-----------------------------------------------------------------------*/
-
 #if _USE_WRITE == 1
-/* Verbatim from ChaN */
-static int xmit_datablock (	/* 1:OK, 0:Failed */
-	const BYTE *buff,		/* Pointer to 512 byte data to be sent */
-	BYTE token				/* Token */
+/**
+ * @brief  Send a 512-byte data block to the SD card.
+ * @param  buff   Pointer to the 512-byte data buffer to transmit.
+ * @param  token  Data token preceding the block: 0xFE = single-block write,
+ *                0xFC = multi-block write, 0xFD = stop transmission.
+ * @return 1 if the card accepted the block, 0 on failure. Verbatim from ChaN.
+ */
+static int xmit_datablock (
+	const BYTE *buff,
+	BYTE token
 )
 {
 	BYTE resp;
@@ -229,14 +254,16 @@ static int xmit_datablock (	/* 1:OK, 0:Failed */
 }
 #endif
 
-/*-----------------------------------------------------------------------*/
-/* Send a command packet to the MMC                                      */
-/*-----------------------------------------------------------------------*/
-
-/* Verbatim from ChaN */
-static BYTE send_cmd (	/* Return value: R1 resp (bit7==1:Failed to send) */
-	BYTE cmd,			/* Command index */
-	DWORD arg			/* Argument */
+/**
+ * @brief  Send an MMC/SD command and return the R1 response byte.
+ * @param  cmd  Command index. OR with 0x80 (ACMD flag) to send CMD55 first.
+ * @param  arg  32-bit command argument.
+ * @return R1 response byte. Bit 7 set indicates the command could not be sent.
+ * @note   Verbatim from ChaN.
+ */
+static BYTE send_cmd (
+	BYTE cmd,
+	DWORD arg
 )
 {
 	BYTE n, res;
