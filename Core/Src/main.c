@@ -155,7 +155,7 @@ int main(void)
         frame_seq++;
         int16_t *p16 = (int16_t *)(tx_frame + 8);
         for (int i = 0; i < AUDIO_BUF_HALF; i++) {
-          p16[i] = (int16_t)(process_buf[i] >> 8);
+          p16[i] = (int16_t)(process_buf[i] >> 10);
         }
         memcpy(tx_frame + 8 + AUDIO_BUF_HALF * 2, &sync_end, 4);
         HAL_UART_Transmit_DMA(&huart2, tx_frame, sizeof(tx_frame));
