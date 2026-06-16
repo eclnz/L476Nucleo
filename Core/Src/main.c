@@ -144,8 +144,9 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     if (audio_ready != 0) {
-      int32_t *half = (audio_ready == 1) ? audio_buf : audio_buf + AUDIO_BUF_HALF;
+      uint8_t rdy = audio_ready;
       audio_ready = 0;
+      int32_t *half = (rdy == 1) ? audio_buf : audio_buf + AUDIO_BUF_HALF;
       memcpy(process_buf, half, sizeof(process_buf));
       if (HAL_UART_GetState(&huart2) == HAL_UART_STATE_READY) {
         uint32_t sync_start = SYNC_START;
