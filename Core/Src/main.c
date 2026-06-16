@@ -56,7 +56,6 @@ DFSDM_Channel_HandleTypeDef hdfsdm1_channel1;
 DMA_HandleTypeDef hdma_dfsdm1_flt0;
 
 SPI_HandleTypeDef hspi2;
-DMA_HandleTypeDef hdma_spi2_tx;
 
 UART_HandleTypeDef huart2;
 DMA_HandleTypeDef hdma_usart2_tx;
@@ -367,9 +366,6 @@ static void MX_DMA_Init(void)
   /* DMA1_Channel4_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel4_IRQn);
-  /* DMA1_Channel5_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
   /* DMA1_Channel7_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel7_IRQn, 1, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel7_IRQn);
