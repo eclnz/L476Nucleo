@@ -41,10 +41,12 @@
 /* Private functions below are adapted from ChaN's mmc_stm32f1_spi.c
  * Copyright (C) 2018, ChaN, all right reserved.
  * https://elm-chan.org/fsw/ff/ffsample.zip
+ * https://elm-chan.org/docs/mmc/mmc_e.html
  * Lines changed from the original are marked [STM32L4-HAL]. */
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
+#define DISK_TICK() HAL_GetTick()
 
 /* [STM32L4-HAL] Original selected SPI channel via SPI_CH and defined CS/clock macros
  * using direct GPIO register writes and SPIx_CR1 manipulation. Replaced with HAL:
@@ -54,18 +56,14 @@
 #define FCLK_SLOW() do { hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128; HAL_SPI_Init(&hspi2); } while(0)
 #define FCLK_FAST() do { hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;   HAL_SPI_Init(&hspi2); } while(0)
 
-/* [STM32L4-HAL] No MMC_CD/MMC_WP pins wired — card always present, never write-protected */
-#define MMC_CD  1
-#define MMC_WP  0
-
 /* MMC card type flags — from ChaN's diskio.h (not present in project's diskio.h) */
-#define CT_MMC3		0x01		/* MMC ver 3 */
-#define CT_MMC4		0x02		/* MMC ver 4+ */
-#define CT_MMC		0x03		/* MMC */
-#define CT_SDC1		0x02		/* SDC ver 1 */
-#define CT_SDC2		0x04		/* SDC ver 2+ */
-#define CT_SDC		0x0C		/* SDC */
-#define CT_BLOCK	0x10		/* Block addressing */
+#define CT_MMC3		0x01	/* MMC ver 3 */
+#define CT_MMC4		0x02	/* MMC ver 4+ */
+#define CT_MMC		0x03	/* MMC */
+#define CT_SDC1		0x02	/* SDC ver 1 */
+#define CT_SDC2		0x04	/* SDC ver 2+ */
+#define CT_SDC		0x0C	/* SDC */
+#define CT_BLOCK	0x10	/* Block addressing */
 
 /* MMC/SD command — verbatim from ChaN mmc_stm32f1_spi.c */
 #define CMD0	(0)			/* GO_IDLE_STATE */
@@ -93,7 +91,7 @@
 /* Disk status */
 static volatile DSTATUS Stat = STA_NOINIT;
 /* [STM32L4-HAL] Timer1/Timer2 (1kHz decrement, driven by disk_timerproc ISR) removed;
- * replaced inline with HAL_GetTick() comparisons throughout. */
+ * Used DISK_TICK() macro */
 static BYTE CardType;
 
 extern SPI_HandleTypeDef hspi2; /* [STM32L4-HAL] */
@@ -101,7 +99,7 @@ extern SPI_HandleTypeDef hspi2; /* [STM32L4-HAL] */
 /*-----------------------------------------------------------------------*/
 /* SPI controls (Platform dependent)                                     */
 /*-----------------------------------------------------------------------*/
-
+/* https://elm-chan.org/docs/spi_e.html */
 /* [STM32L4-HAL] init_spi(): original called SPIxENABLE() to configure GPIO and enable
  * the SPI peripheral. CubeMX handles this; only CS high + settling delay needed. */
 static void init_spi (void)
@@ -110,8 +108,6 @@ static void init_spi (void)
 	HAL_Delay(10);
 }
 
-/* [STM32L4-HAL] xchg_spi(): original wrote/read SPIx_DR directly and polled SPIx_SR.
- * Replaced with HAL_SPI_TransmitReceive. */
 static BYTE xchg_spi (BYTE dat)
 {
 	BYTE rx;
@@ -150,10 +146,10 @@ static int wait_ready (	/* 1:Ready, 0:Timeout */
 {
 	BYTE d;
 
-	uint32_t t = HAL_GetTick(); /* [STM32L4-HAL] was: Timer2 = wt; */
+	uint32_t t = DISK_TICK(); /* [STM32L4-HAL] was: Timer2 = wt; */
 	do {
 		d = xchg_spi(0xFF);
-	} while (d != 0xFF && (HAL_GetTick() - t < wt)); /* [STM32L4-HAL] was: && Timer2 */
+	} while (d != 0xFF && (DISK_TICK() - t < wt)); /* [STM32L4-HAL] was: && Timer2 */
 
 	return (d == 0xFF) ? 1 : 0;
 }
@@ -195,10 +191,10 @@ static int rcvr_datablock (	/* 1:OK, 0:Error */
 {
 	BYTE token;
 
-	uint32_t t = HAL_GetTick(); /* [STM32L4-HAL] was: Timer1 = 200; */
+	uint32_t t = DISK_TICK(); /* [STM32L4-HAL] was: Timer1 = 200; */
 	do {
 		token = xchg_spi(0xFF);
-	} while ((token == 0xFF) && (HAL_GetTick() - t < 200)); /* [STM32L4-HAL] was: && Timer1 */
+	} while ((token == 0xFF) && (DISK_TICK() - t < 200)); /* [STM32L4-HAL] was: && Timer1 */
 	if(token != 0xFE) return 0;
 
 	rcvr_spi_multi(buff, btr);
@@ -280,7 +276,7 @@ static BYTE send_cmd (	/* Return value: R1 resp (bit7==1:Failed to send) */
 
 /* [STM32L4-HAL] disk_timerproc() omitted — it decremented Timer1/Timer2 from a 1ms ISR
  * and updated Stat via MMC_CD/MMC_WP pins. Neither is needed: timeouts use
- * HAL_GetTick() and card detect/WP are hardcoded above. */
+ * card detect/WP are hardcoded above. */
 
 /* USER CODE END DECL */
 
