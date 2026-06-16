@@ -51,10 +51,11 @@
 /* [STM32L4-HAL] Original selected SPI channel via SPI_CH and defined CS/clock macros
  * using direct GPIO register writes and SPIx_CR1 manipulation. Replaced with HAL:
  * CubeMX owns peripheral init; only CS and prescaler need overriding here. */
+#define MMC_SPI     hspi2  /* SPI peripheral used for the SD card — change here to remap */
 #define CS_HIGH()   HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, GPIO_PIN_SET)
 #define CS_LOW()    HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, GPIO_PIN_RESET)
-#define FCLK_SLOW() do { hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128; HAL_SPI_Init(&hspi2); } while(0)
-#define FCLK_FAST() do { hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;   HAL_SPI_Init(&hspi2); } while(0)
+#define FCLK_SLOW() do { MMC_SPI.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128; HAL_SPI_Init(&MMC_SPI); } while(0)
+#define FCLK_FAST() do { MMC_SPI.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;   HAL_SPI_Init(&MMC_SPI); } while(0)
 
 /* MMC card type flags — from ChaN's diskio.h (not present in project's diskio.h) */
 #define CT_MMC3		0x01	/* MMC ver 3 */
@@ -94,14 +95,14 @@ static volatile DSTATUS Stat = STA_NOINIT;
  * Used DISK_TICK() macro */
 static BYTE CardType;
 
-extern SPI_HandleTypeDef hspi2; /* [STM32L4-HAL] */
+extern SPI_HandleTypeDef MMC_SPI; /* [STM32L4-HAL] */
 
 /*-----------------------------------------------------------------------*/
 /* SPI controls (Platform dependent)                                     */
 /*-----------------------------------------------------------------------*/
 /* https://elm-chan.org/docs/spi_e.html */
 /**
- * @brief  [STM32L4-HAL] Initialise the SPI2 interface for SD card use.
+ * @brief  [STM32L4-HAL] Initialise the MMC_SPI interface for SD card use.
  * @note   Originally called SPIxENABLE() to configure GPIO and enable the SPI
  *         peripheral. CubeMX handles peripheral init; only CS de-assertion and
  *         a settling delay are needed here.
@@ -113,7 +114,7 @@ static void init_spi (void)
 }
 
 /**
- * @brief  [STM32L4-HAL] Exchange a single byte over SPI2 (full-duplex, blocking).
+ * @brief  [STM32L4-HAL] Exchange a single byte over MMC_SPI (full-duplex, blocking).
  * @param  dat  Byte to transmit. Pass 0xFF when only receiving.
  * @return Byte received from the peripheral during the same clock cycle.
  * @note   Originally accessed SPIx_DR/SPIx_SR directly; replaced with
@@ -122,12 +123,12 @@ static void init_spi (void)
 static BYTE xchg_spi (BYTE dat)
 {
 	BYTE rx;
-	HAL_SPI_TransmitReceive(&hspi2, &dat, &rx, 1, HAL_MAX_DELAY);
+	HAL_SPI_TransmitReceive(&MMC_SPI, &dat, &rx, 1, HAL_MAX_DELAY);
 	return rx;
 }
 
 /**
- * @brief  [STM32L4-HAL] Receive multiple bytes from the card over SPI2.
+ * @brief  [STM32L4-HAL] Receive multiple bytes from the card over MMC_SPI.
  * @param  buff  Destination buffer; also serves as the TX dummy buffer (pre-filled 0xFF).
  * @param  btr   Number of bytes to receive.
  * @note   Originally switched SPI to 16-bit mode via direct CR1 manipulation for
@@ -138,12 +139,12 @@ static BYTE xchg_spi (BYTE dat)
 static void rcvr_spi_multi (BYTE *buff, UINT btr)
 {
 	memset(buff, 0xFF, btr);
-	HAL_SPI_TransmitReceive(&hspi2, buff, buff, btr, HAL_MAX_DELAY);
+	HAL_SPI_TransmitReceive(&MMC_SPI, buff, buff, btr, HAL_MAX_DELAY);
 }
 
 #if _USE_WRITE == 1
 /**
- * @brief  [STM32L4-HAL] Transmit multiple bytes to the card over SPI2.
+ * @brief  [STM32L4-HAL] Transmit multiple bytes to the card over MMC_SPI.
  * @param  buff  Source data buffer.
  * @param  btx   Number of bytes to transmit.
  * @note   Originally used the 16-bit SPI register trick for throughput. Replaced with
@@ -152,7 +153,7 @@ static void rcvr_spi_multi (BYTE *buff, UINT btr)
  */
 static void xmit_spi_multi (const BYTE *buff, UINT btx)
 {
-	HAL_SPI_Transmit(&hspi2, (BYTE*)buff, btx, HAL_MAX_DELAY);
+	HAL_SPI_Transmit(&MMC_SPI, (BYTE*)buff, btx, HAL_MAX_DELAY);
 }
 #endif
 
