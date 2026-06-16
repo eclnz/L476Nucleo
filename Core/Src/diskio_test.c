@@ -48,6 +48,7 @@ void diskio_test_run(DiskioTestResult *r)
     /* --- USER_write: last sector --------------------------------------------
      * Reads the final sector on the card, writes the same data back, then reads
      * again and compares. Uses the last sector to avoid touching filesystem data. */
+    TEST_ASSERT(r->sector_count > 0);
     DWORD test_sector = r->sector_count - 1;
     TEST_ASSERT(USER_read(0, sector_buf, test_sector, 1) == RES_OK);
     r->write = USER_write(0, sector_buf, test_sector, 1);
