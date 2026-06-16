@@ -147,19 +147,19 @@ int main(void)
       int32_t *half = (audio_ready == 1) ? audio_buf : audio_buf + AUDIO_BUF_HALF;
       audio_ready = 0;
       memcpy(process_buf, half, sizeof(process_buf));
-      uint32_t sync_start = SYNC_START;
-      uint32_t sync_end = SYNC_END;
-      memcpy(tx_frame, &sync_start, 4);
-      memcpy(tx_frame + 4, &frame_seq, 4);
-      frame_seq++;
-      int16_t *p16 = (int16_t *)(tx_frame + 8);
-      for (int i = 0; i < AUDIO_BUF_HALF; i++) {
-        p16[i] = (int16_t)(process_buf[i] >> 8);
-      }
-      memcpy(tx_frame + 8 + AUDIO_BUF_HALF * 2, &sync_end, 4);
       if (HAL_UART_GetState(&huart2) == HAL_UART_STATE_READY) {
+        uint32_t sync_start = SYNC_START;
+        uint32_t sync_end = SYNC_END;
+        memcpy(tx_frame, &sync_start, 4);
+        memcpy(tx_frame + 4, &frame_seq, 4);
+        frame_seq++;
+        int16_t *p16 = (int16_t *)(tx_frame + 8);
+        for (int i = 0; i < AUDIO_BUF_HALF; i++) {
+          p16[i] = (int16_t)(process_buf[i] >> 8);
+        }
+        memcpy(tx_frame + 8 + AUDIO_BUF_HALF * 2, &sync_end, 4);
         HAL_UART_Transmit_DMA(&huart2, tx_frame, sizeof(tx_frame));
-      } 
+      }
     }
   }
   /* USER CODE END 3 */
