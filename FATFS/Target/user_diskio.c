@@ -61,9 +61,12 @@
 #define CT_MMC3		0x01	/* MMC ver 3 */
 #define CT_MMC4		0x02	/* MMC ver 4+ */
 #define CT_MMC		0x03	/* MMC */
-#define CT_SDC1		0x02	/* SDC ver 1 */
+/* [PATCH] CT_SDC1 changed from 0x02 to 0x08 — in ChaN's original, CT_SDC1 collides with
+ * CT_MMC4 (both 0x02), making CT_SDC1 & CT_SDC = 0x00, so ACMD23 pre-erase is never
+ * issued for SDv1 multi-sector writes. 0x08 makes CT_SDC1 a proper subset of CT_SDC. */
+#define CT_SDC1		0x08	/* SDC ver 1 */
 #define CT_SDC2		0x04	/* SDC ver 2+ */
-#define CT_SDC		0x0C	/* SDC */
+#define CT_SDC		0x0C	/* SDC (CT_SDC1 | CT_SDC2) */
 #define CT_BLOCK	0x10	/* Block addressing */
 
 /* MMC/SD command — verbatim from ChaN mmc_stm32f1_spi.c */
