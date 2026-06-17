@@ -46,6 +46,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/detector.c
     Core/Src/diskio_test.c
+    Core/Src/mic.c
 )
 
 # Add include paths

@@ -30,6 +30,7 @@
 #include "detector.h"
 #include "stm32l4xx_hal_gpio.h"
 #include "diskio_test.h"
+#include "mic.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -39,10 +40,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define AUDIO_BUF_HALF 512
-#define AUDIO_BUF_SIZE (AUDIO_BUF_HALF * 2)
-#define SYNC_START 0xABCDABCDU
-#define SYNC_END   0xDCBADCBAU
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -61,11 +59,7 @@ UART_HandleTypeDef huart2;
 DMA_HandleTypeDef hdma_usart2_tx;
 
 /* USER CODE BEGIN PV */
-static int32_t audio_buf[AUDIO_BUF_SIZE];
-static volatile uint8_t audio_ready = 0;
-static int32_t process_buf[AUDIO_BUF_HALF];
-static uint8_t tx_frame[4 + 4 + AUDIO_BUF_HALF * 2 + 4];
-static uint32_t frame_seq = 0;
+static Mic mic;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -119,7 +113,7 @@ int main(void)
   MX_SPI2_Init();
   MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
-  HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, audio_buf, AUDIO_BUF_SIZE);
+  HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, mic.audio_buf, AUDIO_BUF_SIZE);
 
   FRESULT fr = f_mount(&USERFatFS, USERPath, 1);
   if (fr == FR_OK) {
@@ -143,27 +137,9 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    if (audio_ready != 0) {
-      uint8_t rdy = audio_ready;
-      audio_ready = 0;
-      int32_t *half = (rdy == 1) ? audio_buf : audio_buf + AUDIO_BUF_HALF;
-      memcpy(process_buf, half, sizeof(process_buf));
-      if (HAL_UART_GetState(&huart2) == HAL_UART_STATE_READY) {
-        uint32_t sync_start = SYNC_START;
-        uint32_t sync_end = SYNC_END;
-        memcpy(tx_frame, &sync_start, 4);
-        memcpy(tx_frame + 4, &frame_seq, 4);
-        frame_seq++;
-        int16_t *p16 = (int16_t *)(tx_frame + 8);
-        for (int i = 0; i < AUDIO_BUF_HALF; i++) {
-          p16[i] = (int16_t)(process_buf[i] >> 10);
-        }
-        memcpy(tx_frame + 8 + AUDIO_BUF_HALF * 2, &sync_end, 4);
-        HAL_UART_Transmit_DMA(&huart2, tx_frame, sizeof(tx_frame));
-      }
-    }
+    transmit_audio(&mic, &huart2);
   }
-  /* USER CODE END 3 */
+    /* USER CODE END 3 */
 }
 
 /**
@@ -435,12 +411,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 void HAL_DFSDM_FilterRegConvHalfCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filter)
 {
-  audio_ready = 1;
+  mic.half_buf_pos = mic.audio_buf;
+  mic.audio_read_ready = MIC_BUF_HALF;
 }
 
 void HAL_DFSDM_FilterRegConvCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filter)
 {
-  audio_ready = 2;
+  mic.half_buf_pos = mic.audio_buf + AUDIO_BUF_HALF;
+  mic.audio_read_ready = MIC_BUF_FULL;
 }
 
 /* USER CODE END 4 */
