@@ -9,5 +9,6 @@ __pycache__
 
 *.wav
 *.png
+*.pdf
 
 *ChaN_stm32
