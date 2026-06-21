@@ -63,13 +63,13 @@ def update(
     buf: deque,
     dc_offset: DCOffset,
     rate_estimator: RateEstimator,
-    pipeline: Any,
+    pipeline: list,
     spec_im: Any,
 ) -> Any:
     for _seq, batch in reader.read():
         for val in batch:
             dc_offset.value = exp_mov_avg(dc_offset.value, float(val))
-            clean = pipeline(float(val) - dc_offset.value)
+            clean = pipeline[0](float(val) - dc_offset.value)
             rate_estimator.add()
             buf.append(int(clean))
 
@@ -85,9 +85,16 @@ def update(
         if ticks:
             ax.set_yticks(ticks)
             ax.set_yticklabels(labels)
+        if abs(rate - pipeline[1]) / rate > 0.05:
+            pipeline[0] = make_pipeline(
+                make_notch_filter(50.0, rate),
+                make_highpass_filter(30.0, rate, order=4),
+            )
+            pipeline[1] = rate
 
     spec = compute_spectrogram(buf)
-    spec_im.set_array(spec.ravel())
+    if spec.shape[1] > 1:
+        spec_im.set_array(spec.ravel())
     return [spec_im]
 
 
@@ -107,10 +114,13 @@ def main(port: str | None = None, baud: int = BAUD_RATE) -> None:
     dc_offset = DCOffset(value=0.0)
     rate_estimator = RateEstimator()
     reader = MicReader(ser)
-    pipeline = make_pipeline(
-        make_notch_filter(50.0, 16000.0),
-        make_highpass_filter(30.0, 16000.0, order=4),
-    )
+    pipeline = [
+        make_pipeline(
+            make_notch_filter(50.0, 16000.0),
+            make_highpass_filter(30.0, 16000.0, order=4),
+        ),
+        16000.0,  # design fs — rebuilt in update() once real rate is detected
+    ]
     n_frames = (SAMPLE_BUF - SPEC_FRAME + SPEC_HOP - 1) // SPEC_HOP
     fig, ax, spec_im = setup_plot(n_frames)
 
