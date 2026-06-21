@@ -25,7 +25,7 @@ static void int32_buff_to_16(const int32_t *src, int16_t *dst, int len) {
 void transmit_audio(Mic *m, UART_HandleTypeDef *huart){
     if (m->audio_read_ready != MIC_BUF_EMPTY && HAL_UART_GetState(huart) == HAL_UART_STATE_READY) {
         m->audio_read_ready = MIC_BUF_EMPTY;
-        memcpy(m->process_buf, m->half_buf_pos, sizeof(m->process_buf));
+        memcpy(m->process_buf, m->audio_half_buf_pos, sizeof(m->process_buf));
         /* [0-3] SYNC_START */
         memcpy(m->tx_frame, &(uint32_t){SYNC_START}, 4);
         /* [4-7] frame_seq */

@@ -411,13 +411,13 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 void HAL_DFSDM_FilterRegConvHalfCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filter)
 {
-  mic.half_buf_pos = mic.audio_buf;
+  mic.audio_half_buf_pos = mic.audio_buf;
   mic.audio_read_ready = MIC_BUF_HALF;
 }
 
 void HAL_DFSDM_FilterRegConvCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filter)
 {
-  mic.half_buf_pos = mic.audio_buf + AUDIO_BUF_HALF;
+  mic.audio_half_buf_pos = mic.audio_buf + AUDIO_BUF_HALF;
   mic.audio_read_ready = MIC_BUF_FULL;
 }
 

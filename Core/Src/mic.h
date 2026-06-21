@@ -14,8 +14,8 @@ typedef enum  { MIC_BUF_EMPTY, MIC_BUF_HALF, MIC_BUF_FULL } MicBufferState;
 
 typedef struct {
     volatile MicBufferState audio_read_ready;
-    int32_t * volatile half_buf_pos;
-    uint32_t    frame_seq;
+    int32_t * volatile audio_half_buf_pos;
+    uint32_t    frame_seq;                
     int32_t     audio_buf[AUDIO_BUF_SIZE];
     int32_t     process_buf[AUDIO_BUF_HALF];
     uint8_t     tx_frame[TX_FRAME_SIZE];
