@@ -1,4 +1,5 @@
 #include "mic.h"
+#include "ringbuf.h"
 #include "stm32l4xx_hal_conf.h"
 #include "stm32l4xx_hal_uart.h"
 #include <stdint.h>
@@ -18,11 +19,11 @@ static void int32_buff_to_16(const int32_t *src, int16_t *dst, int len) {
 
 /**
  * @brief Build and transmit a framed audio packet over UART DMA.
- * @param m     Mic instance containing audio buffers and state.
+ * @param m     mic_t instance containing audio buffers and state.
  * @param huart UART handle to transmit on.
  * @note  Skipped if UART is still busy with the previous frame.
  */
-void transmit_audio(Mic *m, UART_HandleTypeDef *huart){
+void transmit_audio(mic_t *m, UART_HandleTypeDef *huart){
     if (m->audio_read_ready != MIC_BUF_EMPTY && HAL_UART_GetState(huart) == HAL_UART_STATE_READY) {
         m->audio_read_ready = MIC_BUF_EMPTY;
         memcpy(m->process_buf, m->audio_half_buf_pos, sizeof(m->process_buf));
@@ -38,3 +39,4 @@ void transmit_audio(Mic *m, UART_HandleTypeDef *huart){
         HAL_UART_Transmit_DMA(huart, m->tx_frame, sizeof(m->tx_frame));
     }
 }
+

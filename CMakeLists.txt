@@ -47,6 +47,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/detector.c
     Core/Src/diskio_test.c
     Core/Src/mic.c
+    Core/Src/ringbuf.c
+    Core/Src/sdcard.c
 )
 
 # Add include paths
