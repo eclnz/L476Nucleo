@@ -61,6 +61,7 @@ DMA_HandleTypeDef hdma_usart2_tx;
 /* USER CODE BEGIN PV */
 static mic_t mic;
 static wav_recorder_t wav = { .buf = &mic.ring_buf};
+static volatile bool new_recording_requested = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -117,7 +118,6 @@ int main(void)
   mic_init(&mic);
   HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, mic.audio_buf, AUDIO_BUF_SIZE);
   sdcard_init(&huart2);
-  sdcard_open_recording(&wav);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -127,10 +127,14 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    switch (read_audio(&mic, &mic.ring_buf)) {
-      case MIC_READ_SUCC:      wav.total_bufs++;  break;
-      case MIC_READ_FAIL:      wav.missed_bufs++; break;
-      case MIC_READ_NOT_READY:                    break;
+    if (new_recording_requested) {
+      new_recording_requested = false;
+      HAL_GPIO_TogglePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin);
+      if (wav.is_open) {
+        sdcard_close_recording(&wav);
+      } else {
+        sdcard_open_recording(&wav);
+      }
     }
 
     sdcard_drain(&wav);
@@ -274,7 +278,7 @@ static void MX_SPI2_Init(void)
   hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi2.Init.NSS = SPI_NSS_SOFT;
-  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_128;
+  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
   hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -402,19 +406,27 @@ static void MX_GPIO_Init(void)
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   UNUSED(GPIO_Pin);
-  HAL_GPIO_TogglePin(GREEN_LED_GPIO_Port, GREEN_LED_Pin);
+  new_recording_requested = true;
 }
 
 void HAL_DFSDM_FilterRegConvHalfCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filter)
 {
   mic.audio_half_buf_pos = mic.audio_buf;
   mic.audio_read_ready = MIC_BUF_HALF;
+  if (read_audio(&mic, &mic.ring_buf) == MIC_READ_SUCC)
+    wav.total_bufs++;
+  else if (wav.is_open)
+    wav.missed_bufs++;
 }
 
 void HAL_DFSDM_FilterRegConvCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filter)
 {
   mic.audio_half_buf_pos = mic.audio_buf + AUDIO_BUF_HALF;
   mic.audio_read_ready = MIC_BUF_FULL;
+  if (read_audio(&mic, &mic.ring_buf) == MIC_READ_SUCC)
+    wav.total_bufs++;
+  else if (wav.is_open)
+    wav.missed_bufs++;
 }
 
 /* USER CODE END 4 */

@@ -45,11 +45,32 @@ void sdcard_init(UART_HandleTypeDef *huart) {
 #endif
 }
 
-FRESULT sdcard_open_recording(wav_recorder_t *wav) {
-    return f_open(&wav->file, "audio.bin", FA_CREATE_ALWAYS | FA_WRITE);
+FRESULT sdcard_close_recording(wav_recorder_t *wav) {
+    if (!wav->is_open) return FR_OK;
+    wav->is_open = false;
+    return f_close(&wav->file);
 }
 
+FRESULT sdcard_open_recording(wav_recorder_t *wav) {
+    static uint32_t index = 0;
+    char filename[20];
+    sdcard_close_recording(wav);
+    ring_buf_flush(wav->buf);
+    wav->data_bytes         = 0;
+    wav->total_bufs         = 0;
+    wav->missed_bufs        = 0;
+    wav->sectors_since_sync = 0;
+    snprintf(filename, sizeof(filename), "rec%03lu.bin", index++);
+    FRESULT fr = f_open(&wav->file, filename, FA_CREATE_ALWAYS | FA_WRITE);
+    if (fr == FR_OK) wav->is_open = true;
+    return fr;
+}
+
+/* Sync every 16 sectors (8 KB) to bound data loss on unclean eject */
+#define SYNC_INTERVAL 16
+
 FRESULT sdcard_drain(wav_recorder_t *wav) {
+    if (!wav->is_open) return FR_OK;
     static uint8_t sector[CHUNK_SIZE];
     FRESULT fr = FR_OK;
     while (ring_buf_count(wav->buf) >= CHUNK_SIZE) {
@@ -58,6 +79,11 @@ FRESULT sdcard_drain(wav_recorder_t *wav) {
         fr = f_write(&wav->file, sector, CHUNK_SIZE, &bw);
         if (fr != FR_OK) return fr;
         wav->data_bytes += bw;
+        if (++wav->sectors_since_sync >= SYNC_INTERVAL) {
+            wav->sectors_since_sync = 0;
+            fr = f_sync(&wav->file);
+            if (fr != FR_OK) return fr;
+        }
     }
     return fr;
 }

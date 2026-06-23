@@ -9,6 +9,7 @@
 
 void    sdcard_init(UART_HandleTypeDef *huart);
 FRESULT sdcard_open_recording(wav_recorder_t *wav);
+FRESULT sdcard_close_recording(wav_recorder_t *wav);
 FRESULT sdcard_drain(wav_recorder_t *wav);
 
 #endif /* __SDCARD_H */

@@ -45,7 +45,7 @@ void transmit_audio(mic_t *m, UART_HandleTypeDef *huart){
     }
 }
 
-MicWriteOutc read_audio(mic_t *m, ringbuf_t *r) {
+MicReadOutc read_audio(mic_t *m, ringbuf_t *r) {
     if (m->audio_read_ready == MIC_BUF_EMPTY) {
         return MIC_READ_NOT_READY;
     }

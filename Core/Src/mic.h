@@ -3,6 +3,7 @@
 
 #include "ff.h"
 #include "stm32l4xx_hal.h"
+#include <stdbool.h>
 #include <stdint.h>
 #include "ringbuf.h"
 
@@ -30,17 +31,19 @@ typedef struct {
 
 typedef struct {
     ringbuf_t   *buf;
-    FIL          file;
+    FIL         file;
+    bool        is_open;
     uint32_t    data_bytes;
     uint32_t    sample_rate;
     uint32_t    total_bufs;
     uint32_t    missed_bufs;
+    uint32_t    sectors_since_sync;
 } wav_recorder_t;
 
-typedef enum { MIC_READ_SUCC, MIC_READ_FAIL, MIC_READ_NOT_READY } MicWriteOutc;
+typedef enum { MIC_READ_SUCC, MIC_READ_FAIL, MIC_READ_NOT_READY } MicReadOutc;
 
-void         mic_init(mic_t *m);
-void         transmit_audio(mic_t *m, UART_HandleTypeDef *huart);
-MicWriteOutc read_audio(mic_t *m, ringbuf_t *r);
+void        mic_init(mic_t *m);
+void        transmit_audio(mic_t *m, UART_HandleTypeDef *huart);
+MicReadOutc read_audio(mic_t *m, ringbuf_t *r);
 
 #endif /* __MIC_H */

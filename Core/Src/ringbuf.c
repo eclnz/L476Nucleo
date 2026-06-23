@@ -68,6 +68,10 @@ RingBufPushOutc ring_buf_push(ringbuf_t *rb, const uint8_t *src, uint32_t len) {
  * @param len Number of bytes to read.
  * @return RB_POP_SUCC on success, RB_POP_MISS if insufficient data.
  */
+void ring_buf_flush(ringbuf_t *rb) {
+    rb->tail_count = rb->head_count;
+}
+
 RingBufPopOutc ring_buf_pop(ringbuf_t *rb, uint8_t *dst, uint32_t len) {
     if (len > ring_buf_count(rb)) {
         return RB_POP_MISS;
