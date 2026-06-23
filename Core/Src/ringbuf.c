@@ -57,3 +57,28 @@ RingBufPushOutc ring_buf_push(ringbuf_t *rb, const uint8_t *src, uint32_t len) {
     rb->head_count += len;
     return RB_PUSH_SUCC;
 }
+
+/**
+ * @brief Copies @p len bytes from the ring buffer into @p dst and advances the tail.
+ *
+ * Mirrors ring_buf_push: splits the read across the wrap boundary when needed.
+ *
+ * @param rb  Ring buffer instance.
+ * @param dst Destination buffer (must be at least @p len bytes).
+ * @param len Number of bytes to read.
+ * @return RB_POP_SUCC on success, RB_POP_MISS if insufficient data.
+ */
+RingBufPopOutc ring_buf_pop(ringbuf_t *rb, uint8_t *dst, uint32_t len) {
+    if (len > ring_buf_count(rb)) {
+        return RB_POP_MISS;
+    }
+    uint32_t read_idx     = rb->tail_count & (rb->capacity - 1);
+    uint32_t bytes_to_end = rb->capacity - read_idx;
+    uint32_t first_chunk  = (bytes_to_end < len) ? bytes_to_end : len;
+
+    memcpy(dst,               &rb->data[read_idx], first_chunk);
+    memcpy(dst + first_chunk, &rb->data[0],        len - first_chunk);
+    __DMB();
+    rb->tail_count += len;
+    return RB_POP_SUCC;
+}
