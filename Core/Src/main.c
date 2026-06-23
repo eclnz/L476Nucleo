@@ -114,8 +114,10 @@ int main(void)
   MX_SPI2_Init();
   MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
+  mic_init(&mic);
   HAL_DFSDM_FilterRegularStart_DMA(&hdfsdm1_filter0, mic.audio_buf, AUDIO_BUF_SIZE);
   sdcard_init(&huart2);
+  sdcard_open_recording(&wav);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -125,7 +127,13 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    // transmit_audio(&mic, &huart2);
+    switch (read_audio(&mic, &mic.ring_buf)) {
+      case MIC_READ_SUCC:      wav.total_bufs++;  break;
+      case MIC_READ_FAIL:      wav.missed_bufs++; break;
+      case MIC_READ_NOT_READY:                    break;
+    }
+
+    sdcard_drain(&wav);
   }
   /* USER CODE END 3 */
 }

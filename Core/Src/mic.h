@@ -30,11 +30,17 @@ typedef struct {
 
 typedef struct {
     ringbuf_t   *buf;
+    FIL          file;
     uint32_t    data_bytes;
     uint32_t    sample_rate;
+    uint32_t    total_bufs;
     uint32_t    missed_bufs;
 } wav_recorder_t;
 
-void transmit_audio(mic_t *m, UART_HandleTypeDef *huart);
+typedef enum { MIC_READ_SUCC, MIC_READ_FAIL, MIC_READ_NOT_READY } MicWriteOutc;
+
+void         mic_init(mic_t *m);
+void         transmit_audio(mic_t *m, UART_HandleTypeDef *huart);
+MicWriteOutc read_audio(mic_t *m, ringbuf_t *r);
 
 #endif /* __MIC_H */

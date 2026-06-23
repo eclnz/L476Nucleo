@@ -1,5 +1,9 @@
 #include "sdcard.h"
 #include "diskio_test.h"
+#include "integer.h"
+#include "mic.h"
+#include "ringbuf.h"
+#include <stdint.h>
 #include <stdio.h>
 
 static FRESULT sdcard_write_test(void) {
@@ -39,4 +43,21 @@ void sdcard_init(UART_HandleTypeDef *huart) {
     static DiskioTestResult diskio_test;
     diskio_test_run(&diskio_test);
 #endif
+}
+
+FRESULT sdcard_open_recording(wav_recorder_t *wav) {
+    return f_open(&wav->file, "audio.bin", FA_CREATE_ALWAYS | FA_WRITE);
+}
+
+FRESULT sdcard_drain(wav_recorder_t *wav) {
+    static uint8_t sector[CHUNK_SIZE];
+    FRESULT fr = FR_OK;
+    while (ring_buf_count(wav->buf) >= CHUNK_SIZE) {
+        UINT bw;
+        ring_buf_pop(wav->buf, sector, CHUNK_SIZE);
+        fr = f_write(&wav->file, sector, CHUNK_SIZE, &bw);
+        if (fr != FR_OK) return fr;
+        wav->data_bytes += bw;
+    }
+    return fr;
 }

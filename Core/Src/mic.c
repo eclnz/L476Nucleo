@@ -11,6 +11,11 @@
  * @param dst Output buffer of 16-bit PCM samples.
  * @param len Number of samples to convert.
  */
+void mic_init(mic_t *m) {
+    m->ring_buf.data     = (uint8_t *)m->ring_buf_data;
+    m->ring_buf.capacity = sizeof(m->ring_buf_data);
+}
+
 static void int32_buff_to_16(const int32_t *src, int16_t *dst, int len) {
     for (int i = 0; i < len; i++) {
         dst[i] = (int16_t)(src[i] >> 10);
@@ -40,3 +45,18 @@ void transmit_audio(mic_t *m, UART_HandleTypeDef *huart){
     }
 }
 
+MicWriteOutc read_audio(mic_t *m, ringbuf_t *r) {
+    if (m->audio_read_ready == MIC_BUF_EMPTY) {
+        return MIC_READ_NOT_READY;
+    }
+    m->audio_read_ready = MIC_BUF_EMPTY;
+    memcpy(m->process_buf, m->audio_half_buf_pos, sizeof(m->process_buf));
+
+    int16_t pcm[AUDIO_BUF_HALF];
+    int32_buff_to_16(m->process_buf, pcm, AUDIO_BUF_HALF);
+
+    if (ring_buf_push(r, (uint8_t *)pcm, sizeof(pcm)) == RB_PUSH_MISS) {
+        return MIC_READ_FAIL;
+    }
+    return MIC_READ_SUCC;
+}
