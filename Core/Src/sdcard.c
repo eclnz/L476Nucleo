@@ -5,6 +5,7 @@
 #include "ringbuf.h"
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 static FRESULT sdcard_write_test(void) {
     FIL file;
@@ -45,10 +46,67 @@ void sdcard_init(UART_HandleTypeDef *huart) {
 #endif
 }
 
+static FRESULT write_wav_header(FIL *file, uint32_t sample_rate) {
+    uint8_t hdr[44];
+    uint32_t byte_rate   = sample_rate * 2;
+    uint32_t fmt_size    = 16;
+    uint16_t audio_fmt   = 1, channels = 1, block_align = 2, bits = 16;
+    uint32_t placeholder = 0;
+
+    memcpy(&hdr[0],  "RIFF",       4);
+    memcpy(&hdr[4],  &placeholder, 4);
+    memcpy(&hdr[8],  "WAVE",       4);
+    memcpy(&hdr[12], "fmt ",       4);
+    memcpy(&hdr[16], &fmt_size,    4);
+    memcpy(&hdr[20], &audio_fmt,   2);
+    memcpy(&hdr[22], &channels,    2);
+    memcpy(&hdr[24], &sample_rate, 4);
+    memcpy(&hdr[28], &byte_rate,   4);
+    memcpy(&hdr[32], &block_align, 2);
+    memcpy(&hdr[34], &bits,        2);
+    memcpy(&hdr[36], "data",       4);
+    memcpy(&hdr[40], &placeholder, 4);
+
+    UINT bw;
+    return f_write(file, hdr, sizeof(hdr), &bw);
+}
+
+static FRESULT finalize_wav_header(FIL *file, uint32_t data_bytes) {
+    uint32_t riff_size = data_bytes + 36;
+    UINT bw;
+    FRESULT fr;
+
+    fr = f_lseek(file, 4);
+    if (fr != FR_OK) return fr;
+    fr = f_write(file, &riff_size, 4, &bw);
+    if (fr != FR_OK) return fr;
+
+    fr = f_lseek(file, 40);
+    if (fr != FR_OK) return fr;
+    return f_write(file, &data_bytes, 4, &bw);
+}
+
 FRESULT sdcard_close_recording(wav_recorder_t *wav) {
     if (!wav->is_open) return FR_OK;
+
+    FRESULT fr = sdcard_drain(wav);
+    if (fr == FR_OK) {
+        uint32_t remaining = ring_buf_count(wav->buf);
+        if (remaining > 0) {
+            static uint8_t tail[CHUNK_SIZE];
+            ring_buf_pop(wav->buf, tail, remaining);
+            UINT bw;
+            fr = f_write(&wav->file, tail, remaining, &bw);
+            if (fr == FR_OK) wav->data_bytes += bw;
+        }
+    }
+
+    if (fr == FR_OK)
+        fr = finalize_wav_header(&wav->file, wav->data_bytes);
+
     wav->is_open = false;
-    return f_close(&wav->file);
+    FRESULT close_fr = f_close(&wav->file);
+    return fr != FR_OK ? fr : close_fr;
 }
 
 FRESULT sdcard_open_recording(wav_recorder_t *wav) {
@@ -60,8 +118,11 @@ FRESULT sdcard_open_recording(wav_recorder_t *wav) {
     wav->total_bufs         = 0;
     wav->missed_bufs        = 0;
     wav->sectors_since_sync = 0;
-    snprintf(filename, sizeof(filename), "rec%03lu.bin", index++);
+    wav->sample_rate        = 40000;
+    snprintf(filename, sizeof(filename), "rec%03lu.wav", index++);
     FRESULT fr = f_open(&wav->file, filename, FA_CREATE_ALWAYS | FA_WRITE);
+    if (fr != FR_OK) return fr;
+    fr = write_wav_header(&wav->file, wav->sample_rate);
     if (fr == FR_OK) wav->is_open = true;
     return fr;
 }

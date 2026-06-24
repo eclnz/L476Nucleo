@@ -413,20 +413,22 @@ void HAL_DFSDM_FilterRegConvHalfCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_
 {
   mic.audio_half_buf_pos = mic.audio_buf;
   mic.audio_read_ready = MIC_BUF_HALF;
-  if (read_audio(&mic, &mic.ring_buf) == MIC_READ_SUCC)
-    wav.total_bufs++;
-  else if (wav.is_open)
+  if (read_audio(&mic, &mic.ring_buf) == MIC_READ_SUCC) {
+    if (wav.is_open) wav.total_bufs++;
+  } else if (wav.is_open) {
     wav.missed_bufs++;
+  }
 }
 
 void HAL_DFSDM_FilterRegConvCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filter)
 {
   mic.audio_half_buf_pos = mic.audio_buf + AUDIO_BUF_HALF;
   mic.audio_read_ready = MIC_BUF_FULL;
-  if (read_audio(&mic, &mic.ring_buf) == MIC_READ_SUCC)
-    wav.total_bufs++;
-  else if (wav.is_open)
+  if (read_audio(&mic, &mic.ring_buf) == MIC_READ_SUCC) {
+    if (wav.is_open) wav.total_bufs++;
+  } else if (wav.is_open) {
     wav.missed_bufs++;
+  }
 }
 
 /* USER CODE END 4 */
