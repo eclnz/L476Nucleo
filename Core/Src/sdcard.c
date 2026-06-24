@@ -46,33 +46,50 @@ void sdcard_init(UART_HandleTypeDef *huart) {
 #endif
 }
 
-static FRESULT write_wav_header(FIL *file, uint32_t sample_rate) {
-    uint8_t hdr[44];
-    uint32_t byte_rate   = sample_rate * 2;
-    uint32_t fmt_size    = 16;
-    uint16_t audio_fmt   = 1, channels = 1, block_align = 2, bits = 16;
-    uint32_t placeholder = 0;
+/* Header is padded to 512 bytes with a JUNK chunk so audio data starts on a
+   sector boundary, keeping every subsequent write sector-aligned. Layout:
+     0–11   RIFF descriptor  (12 bytes)
+    12–35   fmt sub-chunk    (24 bytes)
+    36–43   JUNK sub-chunk header — "JUNK" + 460  (8 bytes)
+    44–503  JUNK data        (460 zero bytes)
+   504–511  data sub-chunk header — "data" + placeholder  (8 bytes)
+   512+     audio samples */
+#define WAV_HEADER_SIZE 512
+#define JUNK_DATA_SIZE  460
 
-    memcpy(&hdr[0],  "RIFF",       4);
-    memcpy(&hdr[4],  &placeholder, 4);
-    memcpy(&hdr[8],  "WAVE",       4);
-    memcpy(&hdr[12], "fmt ",       4);
-    memcpy(&hdr[16], &fmt_size,    4);
-    memcpy(&hdr[20], &audio_fmt,   2);
-    memcpy(&hdr[22], &channels,    2);
-    memcpy(&hdr[24], &sample_rate, 4);
-    memcpy(&hdr[28], &byte_rate,   4);
-    memcpy(&hdr[32], &block_align, 2);
-    memcpy(&hdr[34], &bits,        2);
-    memcpy(&hdr[36], "data",       4);
-    memcpy(&hdr[40], &placeholder, 4);
+static FRESULT write_wav_header(FIL *file, uint32_t sample_rate) {
+    uint8_t hdr[WAV_HEADER_SIZE];
+    uint32_t byte_rate    = sample_rate * 2;
+    uint32_t fmt_size     = 16;
+    uint32_t junk_size    = JUNK_DATA_SIZE;
+    uint32_t placeholder  = 0;
+    uint16_t audio_fmt    = 1, channels = 1, block_align = 2, bits = 16;
+
+    memset(hdr, 0, sizeof(hdr));
+    memcpy(&hdr[0],   "RIFF",       4);
+    memcpy(&hdr[4],   &placeholder, 4);
+    memcpy(&hdr[8],   "WAVE",       4);
+    memcpy(&hdr[12],  "fmt ",       4);
+    memcpy(&hdr[16],  &fmt_size,    4);
+    memcpy(&hdr[20],  &audio_fmt,   2);
+    memcpy(&hdr[22],  &channels,    2);
+    memcpy(&hdr[24],  &sample_rate, 4);
+    memcpy(&hdr[28],  &byte_rate,   4);
+    memcpy(&hdr[32],  &block_align, 2);
+    memcpy(&hdr[34],  &bits,        2);
+    memcpy(&hdr[36],  "JUNK",       4);
+    memcpy(&hdr[40],  &junk_size,   4);
+    /* hdr[44..503] already zeroed by memset */
+    memcpy(&hdr[504], "data",       4);
+    memcpy(&hdr[508], &placeholder, 4);
 
     UINT bw;
     return f_write(file, hdr, sizeof(hdr), &bw);
 }
 
 static FRESULT finalize_wav_header(FIL *file, uint32_t data_bytes) {
-    uint32_t riff_size = data_bytes + 36;
+    /* RIFF chunk size = total file size - 8; total = WAV_HEADER_SIZE + data_bytes */
+    uint32_t riff_size = data_bytes + WAV_HEADER_SIZE - 8;
     UINT bw;
     FRESULT fr;
 
@@ -81,7 +98,7 @@ static FRESULT finalize_wav_header(FIL *file, uint32_t data_bytes) {
     fr = f_write(file, &riff_size, 4, &bw);
     if (fr != FR_OK) return fr;
 
-    fr = f_lseek(file, 40);
+    fr = f_lseek(file, 508);
     if (fr != FR_OK) return fr;
     return f_write(file, &data_bytes, 4, &bw);
 }
