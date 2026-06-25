@@ -1,5 +1,6 @@
 #include "mic.h"
 #include "ringbuf.h"
+#include "diag.h"
 #include "stm32l4xx_hal_conf.h"
 #include "stm32l4xx_hal_uart.h"
 #include <stdint.h>
@@ -56,7 +57,9 @@ MicReadOutc read_audio(mic_t *m, ringbuf_t *r) {
     int32_buff_to_16(m->process_buf, pcm, AUDIO_BUF_HALF);
 
     if (ring_buf_push(r, (uint8_t *)pcm, sizeof(pcm)) == RB_PUSH_MISS) {
+        diag_missed_bufs++;
         return MIC_READ_FAIL;
     }
+    diag_samples_pushed += AUDIO_BUF_HALF;
     return MIC_READ_SUCC;
 }

@@ -31,6 +31,7 @@
 #include "stm32l4xx_hal_gpio.h"
 #include "mic.h"
 #include "sdcard.h"
+#include "diag.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -138,6 +139,7 @@ int main(void)
     }
 
     sdcard_drain(&wav);
+    diag_poll(&huart2, ring_buf_count(&mic.ring_buf));
   }
   /* USER CODE END 3 */
 }
@@ -411,6 +413,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 void HAL_DFSDM_FilterRegConvHalfCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filter)
 {
+  diag_dma_cbs++;
   mic.audio_half_buf_pos = mic.audio_buf;
   mic.audio_read_ready = MIC_BUF_HALF;
   if (read_audio(&mic, &mic.ring_buf) == MIC_READ_SUCC)
@@ -421,6 +424,7 @@ void HAL_DFSDM_FilterRegConvHalfCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_
 
 void HAL_DFSDM_FilterRegConvCpltCallback(DFSDM_Filter_HandleTypeDef *hdfsdm_filter)
 {
+  diag_dma_cbs++;
   mic.audio_half_buf_pos = mic.audio_buf + AUDIO_BUF_HALF;
   mic.audio_read_ready = MIC_BUF_FULL;
   if (read_audio(&mic, &mic.ring_buf) == MIC_READ_SUCC)

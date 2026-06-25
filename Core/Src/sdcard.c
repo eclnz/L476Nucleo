@@ -3,6 +3,7 @@
 #include "integer.h"
 #include "mic.h"
 #include "ringbuf.h"
+#include "diag.h"
 #include <stdint.h>
 #include <stdio.h>
 
@@ -79,6 +80,7 @@ FRESULT sdcard_drain(wav_recorder_t *wav) {
         fr = f_write(&wav->file, sector, CHUNK_SIZE, &bw);
         if (fr != FR_OK) return fr;
         wav->data_bytes += bw;
+        diag_sd_bytes   += bw;
         if (++wav->sectors_since_sync >= SYNC_INTERVAL) {
             wav->sectors_since_sync = 0;
             fr = f_sync(&wav->file);
