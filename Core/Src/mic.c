@@ -5,12 +5,6 @@
 #include <stdint.h>
 #include <string.h>
 
-/**
- * @brief Convert 32-bit DFSDM samples to 16-bit PCM by right-shifting 10 bits.
- * @param src Input buffer of 32-bit DFSDM samples.
- * @param dst Output buffer of 16-bit PCM samples.
- * @param len Number of samples to convert.
- */
 void mic_init(mic_t *m) {
     m->ring_buf.data     = (uint8_t *)m->ring_buf_data;
     m->ring_buf.capacity = sizeof(m->ring_buf_data);
